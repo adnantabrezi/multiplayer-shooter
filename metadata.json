@@ -1,0 +1,6 @@
+{
+  "name": "Mini Militia HTML5",
+  "description": "An authentic HTML5 clone of Doodle Army 2: Mini Militia featuring jetpack physics, dual-stick aiming, weapons, grenades, maps, AI bots, and custom avatars.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
