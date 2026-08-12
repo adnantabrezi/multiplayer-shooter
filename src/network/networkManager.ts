@@ -358,7 +358,33 @@ class NetworkManager {
   public sendPlayerState(player: Player) {
     this.send({
       type: 'player_state',
-      playerState: player
+      playerState: {
+        id: player.id,
+        name: player.name,
+        team: player.team,
+        avatar: player.avatar,
+        x: Math.round(player.x * 10) / 10,
+        y: Math.round(player.y * 10) / 10,
+        vx: Math.round(player.vx * 10) / 10,
+        vy: Math.round(player.vy * 10) / 10,
+        aimAngle: Math.round(player.aimAngle * 1000) / 1000,
+        facingRight: player.facingRight,
+        isBoosting: player.isBoosting,
+        isCrouching: player.isCrouching,
+        isMeleeAttacking: player.isMeleeAttacking,
+        health: Math.round(player.health),
+        maxHealth: player.maxHealth,
+        nitro: Math.round(player.nitro),
+        maxNitro: player.maxNitro,
+        primaryWeapon: player.primaryWeapon,
+        secondaryWeapon: player.secondaryWeapon,
+        currentMag: player.currentMag,
+        reserveAmmo: player.reserveAmmo,
+        isDead: player.isDead,
+        isReloading: player.isReloading,
+        kills: player.kills,
+        deaths: player.deaths
+      }
     });
   }
 

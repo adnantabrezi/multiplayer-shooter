@@ -879,8 +879,9 @@ export const GameCanvas: React.FC<Props> = ({
     if (killFeedRef.current.length > 5) killFeedRef.current.pop();
   };
 
-  // Throttled HUD update ref
+  // Throttled HUD & Network send refs
   const lastHudUpdateRef = useRef<number>(0);
+  const lastStateSendTimeRef = useRef<number>(0);
 
   // Main 60FPS Game Loop
   useEffect(() => {
@@ -975,7 +976,8 @@ export const GameCanvas: React.FC<Props> = ({
 
         updatePlayerPhysics(human, map, { moveLeft, moveRight, boost, crouch, aimAngle }, dt);
 
-        if (isMultiplayer && human) {
+        if (isMultiplayer && human && time - lastStateSendTimeRef.current > 33) {
+          lastStateSendTimeRef.current = time;
           networkManager.sendPlayerState({
             ...human,
             id: networkManager.clientId || 'human_1'
