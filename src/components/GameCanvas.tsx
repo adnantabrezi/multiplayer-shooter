@@ -130,10 +130,10 @@ export const GameCanvas: React.FC<Props> = ({
     const doc = document as any;
     const elem = document.documentElement as any;
     if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
-      if (elem.requestFullscreen) elem.requestFullscreen().catch(() => {});
+      if (elem.requestFullscreen) elem.requestFullscreen().catch(() => { });
       else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
     } else {
-      if (doc.exitFullscreen) doc.exitFullscreen().catch(() => {});
+      if (doc.exitFullscreen) doc.exitFullscreen().catch(() => { });
       else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
     }
   };
@@ -147,7 +147,7 @@ export const GameCanvas: React.FC<Props> = ({
   const keysRef = useRef<{ [key: string]: boolean }>({});
   const touchInputsRef = useRef({ moveX: 0, moveY: 0, isBoosting: false, isCrouching: false, aimAngle: null as number | null, isShooting: false });
   const cameraPosRef = useRef<{ x: number; y: number } | null>(null);
-  
+
   // Weapon swap, pickup & animation refs
   const pendingSwapWeaponRef = useRef(false);
   const pendingPickUpWeaponRef = useRef(false);
@@ -161,6 +161,8 @@ export const GameCanvas: React.FC<Props> = ({
   const matchEndedRef = useRef<boolean>(false);
 
   // PUBG Battle Royale Refs
+
+
   const blueZoneRef = useRef<BlueZoneState>({
     centerX: map.width / 2,
     centerY: map.height / 2,
@@ -331,7 +333,7 @@ export const GameCanvas: React.FC<Props> = ({
     if (isMultiplayer) {
       networkManager.onSnapshotReceived = (snapshot, interpolatedPlayers) => {
         bulletsRef.current = snapshot.bullets || [];
-        
+
         // Spawn visual & audio explosion effects from server explosion events
         const explosions = (snapshot as any).explosions || [];
         for (const exp of explosions) {
@@ -1235,42 +1237,42 @@ export const GameCanvas: React.FC<Props> = ({
           spawnExplosion
         );
 
-      // --- PUBG BATTLE ROYALE MODE LOGIC ---
-      if (settings.gameMode === 'battle-royale') {
-        const bz = blueZoneRef.current;
-        bz.shrinkTimer -= dt / 1000.0;
+        // --- PUBG BATTLE ROYALE MODE LOGIC ---
+        if (settings.gameMode === 'battle-royale') {
+          const bz = blueZoneRef.current;
+          bz.shrinkTimer -= dt / 1000.0;
 
-        if (bz.shrinkTimer <= 0) {
-          if (!bz.isShrinking) {
-            bz.isShrinking = true;
-            bz.phase += 1;
-            bz.targetRadius = Math.max(120, bz.currentRadius * 0.55);
-            bz.shrinkTimer = 15.0; // 15s shrinking phase
-          } else {
-            bz.isShrinking = false;
-            bz.shrinkTimer = 20.0; // 20s hold phase
-          }
-        }
-
-        if (bz.isShrinking && bz.currentRadius > bz.targetRadius) {
-          bz.currentRadius -= (dt / 1000.0) * 20.0;
-        }
-
-        // Ticking Blue Zone Damage to all players outside circle
-        playersRef.current.forEach((p) => {
-          if (p.isDead) return;
-          const distFromCenter = Math.hypot(p.x - bz.centerX, p.y - bz.centerY);
-          if (distFromCenter > bz.currentRadius) {
-            p.health -= (dt / 1000.0) * bz.damagePerSec;
-            p.lastDamageTime = Date.now();
-            if (p.health <= 0) {
-              p.health = 0;
-              p.isDead = true;
-              p.deaths += 1;
+          if (bz.shrinkTimer <= 0) {
+            if (!bz.isShrinking) {
+              bz.isShrinking = true;
+              bz.phase += 1;
+              bz.targetRadius = Math.max(120, bz.currentRadius * 0.55);
+              bz.shrinkTimer = 15.0; // 15s shrinking phase
+            } else {
+              bz.isShrinking = false;
+              bz.shrinkTimer = 20.0; // 20s hold phase
             }
           }
-        });
-      }
+
+          if (bz.isShrinking && bz.currentRadius > bz.targetRadius) {
+            bz.currentRadius -= (dt / 1000.0) * 20.0;
+          }
+
+          // Ticking Blue Zone Damage to all players outside circle
+          playersRef.current.forEach((p) => {
+            if (p.isDead) return;
+            const distFromCenter = Math.hypot(p.x - bz.centerX, p.y - bz.centerY);
+            if (distFromCenter > bz.currentRadius) {
+              p.health -= (dt / 1000.0) * bz.damagePerSec;
+              p.lastDamageTime = Date.now();
+              if (p.health <= 0) {
+                p.health = 0;
+                p.isDead = true;
+                p.deaths += 1;
+              }
+            }
+          });
+        }
 
         // Offline Match Timer Countdown (Min 2 mins, Max 10 mins)
         if (!matchEndedRef.current) {
@@ -1416,7 +1418,7 @@ export const GameCanvas: React.FC<Props> = ({
       if (settings.gameMode === 'battle-royale') {
         const bz = blueZoneRef.current;
         ctx.save();
-        
+
         // Electric Blue Ring
         ctx.strokeStyle = 'rgba(52, 152, 219, 0.85)';
         ctx.lineWidth = 6;
@@ -1595,10 +1597,10 @@ export const GameCanvas: React.FC<Props> = ({
             settings.laserColor === 'green'
               ? '34, 197, 94'
               : settings.laserColor === 'cyan'
-              ? '6, 182, 212'
-              : settings.laserColor === 'yellow'
-              ? '234, 179, 8'
-              : '239, 68, 68';
+                ? '6, 182, 212'
+                : settings.laserColor === 'yellow'
+                  ? '234, 179, 8'
+                  : '239, 68, 68';
 
           // Outer Glow Line
           ctx.strokeStyle = `rgba(${lColor}, 0.35)`;
@@ -1828,13 +1830,13 @@ export const GameCanvas: React.FC<Props> = ({
 
   return (
     <div className="relative w-full h-full bg-slate-950 overflow-hidden select-none">
-      
+
       {/* 60FPS Game Rendering Canvas */}
       <canvas ref={canvasRef} className="w-full h-full block cursor-crosshair" />
 
       {/* Ultra-Slim Tactical HUD Overlay */}
       <div className="absolute top-3 left-3 right-3 pointer-events-none flex justify-between items-center z-20">
-        
+
         {/* Left: Slim Sergeant Major Badge */}
         <div className="flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-md shadow-xl">
           <div className="w-7 h-7 bg-red-600 rounded-full flex items-center justify-center font-black text-white text-xs border border-white shadow">
@@ -1913,19 +1915,18 @@ export const GameCanvas: React.FC<Props> = ({
 
       {/* Middle Bottom Tactical Weapon Inventory & Ammo HUD Bar (3X Scale for clear visibility) */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex flex-col items-center gap-1.5 select-none scale-[1.85] sm:scale-[2.3] origin-bottom">
-        
+
         {/* Tactical Weapon Bar Container */}
         <div className="flex items-center bg-[#1e242b]/95 border-2 border-white/30 rounded-xl overflow-hidden shadow-2xl backdrop-blur-md">
-          
+
           {/* Box 1: Active Weapon Silhouette */}
-          <div 
+          <div
             onClick={() => {
               const human = playersRef.current.find(p => p.id === 'human_1');
               if (human) swapWeapon(human);
             }}
-            className={`relative flex items-center justify-center px-3 py-1.5 bg-[#2a3038] border-r border-white/10 transition-all cursor-pointer ${
-              hudState.isDrawAnim ? 'bg-[#374151] ring-2 ring-yellow-400 shadow-[0_0_12px_rgba(250,204,21,0.5)]' : 'hover:bg-[#343b44]'
-            }`}
+            className={`relative flex items-center justify-center px-3 py-1.5 bg-[#2a3038] border-r border-white/10 transition-all cursor-pointer ${hudState.isDrawAnim ? 'bg-[#374151] ring-2 ring-yellow-400 shadow-[0_0_12px_rgba(250,204,21,0.5)]' : 'hover:bg-[#343b44]'
+              }`}
             title="Active Primary Weapon"
           >
             <WeaponSilhouette type={hudState.primaryWeapon} className="w-16 h-8 text-white drop-shadow" />
@@ -1933,7 +1934,7 @@ export const GameCanvas: React.FC<Props> = ({
 
           {/* Box 2: Secondary Inventory Weapon Slot */}
           {hudState.secondaryWeapon && (
-            <div 
+            <div
               onClick={() => {
                 const human = playersRef.current.find(p => p.id === 'human_1');
                 if (human) swapWeapon(human);
@@ -1954,10 +1955,10 @@ export const GameCanvas: React.FC<Props> = ({
               <div className="text-center">
                 <span className="text-[9px] font-black text-yellow-400 animate-pulse block">RELOAD</span>
                 <div className="w-10 bg-black/60 h-1 rounded overflow-hidden mt-0.5 border border-yellow-400/40">
-                  <div 
+                  <div
                     className="bg-yellow-400 h-full transition-all duration-75"
-                    style={{ 
-                      width: `${Math.min(100, Math.max(10, ((hudState.reloadProgress || 0) / (getWeapon(hudState.primaryWeapon)?.reloadTime || 1600)) * 100))}%` 
+                    style={{
+                      width: `${Math.min(100, Math.max(10, ((hudState.reloadProgress || 0) / (getWeapon(hudState.primaryWeapon)?.reloadTime || 1600)) * 100))}%`
                     }}
                   />
                 </div>
@@ -1976,7 +1977,7 @@ export const GameCanvas: React.FC<Props> = ({
           </div>
 
           {/* Box 4: Frag Grenade Box */}
-          <div 
+          <div
             onClick={() => {
               const human = playersRef.current.find(p => p.id === 'human_1');
               if (human) throwGrenade(human);
@@ -1991,7 +1992,7 @@ export const GameCanvas: React.FC<Props> = ({
           </div>
 
           {/* Box 5: Equipment / Radio Utility Box */}
-          <div 
+          <div
             className="relative flex items-center justify-center px-2.5 py-1.5 bg-[#2a3038]"
             title="Tactical Radio Equipment"
           >
