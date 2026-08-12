@@ -45,14 +45,25 @@ export interface RoomListItem {
 
 const getBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location) {
-    // If served from Go server or Vite, fallback to port 8080 if origin is dev
-    const port = window.location.port === '5173' ? ':8080' : window.location.port ? `:${window.location.port}` : ':8080';
-    return `${window.location.protocol}//${window.location.hostname}${port}`;
+    // If dev server (Vite on port 5173), target backend on port 8080
+    if (window.location.port === '5173') {
+      return `${window.location.protocol}//${window.location.hostname}:8080`;
+    }
+    // Production (served by Go server on Render at https://mini-militia-game.onrender.com or localhost)
+    return window.location.origin;
   }
   return 'http://localhost:8080';
 };
 
+const getWsUrl = () => {
+  const baseUrl = getBaseUrl();
+  const wsProtocol = baseUrl.startsWith('https') ? 'wss:' : 'ws:';
+  const host = baseUrl.replace(/^https?:\/\//, '');
+  return `${wsProtocol}//${host}/api/ws`;
+};
+
 class NetworkManager {
+  private ws: WebSocket | null = null;
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
   public clientId: string = '';
@@ -85,13 +96,80 @@ class NetworkManager {
   public onTelemetryUpdated?: (telemetry: { ping: number; inKbs: number; outKbs: number; pps: number }) => void;
 
   public async connect(_url?: string): Promise<boolean> {
-    try {
-      if (this.dc && this.dc.readyState === 'open') {
-        return true;
+    if ((this.ws && this.ws.readyState === WebSocket.OPEN) || (this.dc && this.dc.readyState === 'open')) {
+      return true;
+    }
+
+    this.disconnect();
+
+    // 1. Primary: High performance WebSocket over TCP (100% cloud / Render proxy compatible)
+    const wsSuccess = await this.connectWebSocket();
+    if (wsSuccess) {
+      return true;
+    }
+
+    // 2. Secondary: Fallback to WebRTC DataChannel (UDP)
+    return this.connectWebRTC();
+  }
+
+  private connectWebSocket(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      try {
+        const wsUrl = getWsUrl();
+        console.log('⚡ Connecting to Go WebSocket engine at:', wsUrl);
+        const socket = new WebSocket(wsUrl);
+        socket.binaryType = 'arraybuffer';
+
+        let isResolved = false;
+
+        socket.onopen = () => {
+          this.ws = socket;
+          this.isConnected = true;
+          this.onConnectionChanged?.(true);
+          this.startPingLoop();
+          if (!isResolved) {
+            isResolved = true;
+            resolve(true);
+          }
+        };
+
+        socket.onmessage = (event) => {
+          this.handleRawMessage(event.data);
+        };
+
+        socket.onerror = (err) => {
+          console.warn('WebSocket connection attempt error:', err);
+          if (!isResolved) {
+            isResolved = true;
+            resolve(false);
+          }
+        };
+
+        socket.onclose = () => {
+          if (this.ws === socket) {
+            this.isConnected = false;
+            this.onConnectionChanged?.(false);
+            this.stopPingLoop();
+            this.ws = null;
+          }
+        };
+
+        // Timeout connection attempt after 3.5 seconds
+        setTimeout(() => {
+          if (!isResolved) {
+            isResolved = true;
+            resolve(false);
+          }
+        }, 3500);
+      } catch (e) {
+        console.error('WebSocket connection error:', e);
+        resolve(false);
       }
+    });
+  }
 
-      this.disconnect();
-
+  private connectWebRTC(): Promise<boolean> {
+    try {
       this.pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
@@ -99,7 +177,6 @@ class NetworkManager {
         ]
       });
 
-      // Unreliable & Unordered WebRTC DataChannel = Raw fast UDP transport
       this.dc = this.pc.createDataChannel('game', {
         ordered: false,
         maxRetransmits: 0
@@ -121,28 +198,7 @@ class NetworkManager {
         this.dc!.binaryType = 'arraybuffer';
 
         this.dc!.onmessage = (event) => {
-          try {
-            if (event.data instanceof ArrayBuffer) {
-              this.bytesInWindow += event.data.byteLength;
-              this.packetsInWindow++;
-              const u8 = new Uint8Array(event.data);
-              if (u8[0] === 0x02) {
-                // PacketTypeSnapshot binary ArrayBuffer
-                const view = new DataView(event.data);
-                const jsonLen = view.getUint32(1, true);
-                const jsonText = new TextDecoder().decode(u8.subarray(5, 5 + jsonLen));
-                const snapshotData = JSON.parse(jsonText);
-                this.handleServerMessage(snapshotData);
-              }
-            } else if (typeof event.data === 'string') {
-              this.bytesInWindow += event.data.length;
-              this.packetsInWindow++;
-              const data = JSON.parse(event.data);
-              this.handleServerMessage(data);
-            }
-          } catch (e) {
-            console.error('Failed to parse WebRTC packet:', e);
-          }
+          this.handleRawMessage(event.data);
         };
 
         this.dc!.onerror = (err) => {
@@ -218,12 +274,41 @@ class NetworkManager {
       });
     } catch (e) {
       console.error('WebRTC connection error:', e);
-      return false;
+      return Promise.resolve(false);
+    }
+  }
+
+  private handleRawMessage(rawData: any) {
+    try {
+      if (rawData instanceof ArrayBuffer) {
+        this.bytesInWindow += rawData.byteLength;
+        this.packetsInWindow++;
+        const u8 = new Uint8Array(rawData);
+        if (u8[0] === 0x02) {
+          // PacketTypeSnapshot binary ArrayBuffer
+          const view = new DataView(rawData);
+          const jsonLen = view.getUint32(1, true);
+          const jsonText = new TextDecoder().decode(u8.subarray(5, 5 + jsonLen));
+          const snapshotData = JSON.parse(jsonText);
+          this.handleServerMessage(snapshotData);
+        }
+      } else if (typeof rawData === 'string') {
+        this.bytesInWindow += rawData.length;
+        this.packetsInWindow++;
+        const data = JSON.parse(rawData);
+        this.handleServerMessage(data);
+      }
+    } catch (e) {
+      console.error('Failed to parse server packet:', e);
     }
   }
 
   public disconnect() {
     this.stopPingLoop();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
     if (this.dc) {
       this.dc.close();
       this.dc = null;
@@ -272,46 +357,46 @@ class NetworkManager {
 
   public sendInput(input: Omit<ClientInputState, 'seq'>): number {
     this.inputSeq++;
-    const fullInput: ClientInputState = {
-      ...input,
-      seq: this.inputSeq
-    };
 
-    if (this.dc && this.dc.readyState === 'open') {
-      const buf = new ArrayBuffer(15);
-      const view = new DataView(buf);
-      const uint8 = new Uint8Array(buf);
+    const buf = new ArrayBuffer(15);
+    const view = new DataView(buf);
+    const uint8 = new Uint8Array(buf);
 
-      // Packet Type: 0x01 (Input)
-      uint8[0] = 0x01;
+    // Packet Type: 0x01 (Input)
+    uint8[0] = 0x01;
 
-      // Seq (bytes 1-4)
-      view.setUint32(1, this.inputSeq, true);
+    // Seq (bytes 1-4)
+    view.setUint32(1, this.inputSeq, true);
 
-      // Flags 1 (byte 5)
-      let flags1 = 0;
-      if (input.moveLeft) flags1 |= 1 << 0;
-      if (input.moveRight) flags1 |= 1 << 1;
-      if (input.boost) flags1 |= 1 << 2;
-      if (input.crouch) flags1 |= 1 << 3;
-      if (input.isShooting) flags1 |= 1 << 4;
-      if (input.throwGrenade) flags1 |= 1 << 5;
-      if (input.swapWeapon) flags1 |= 1 << 6;
-      if (input.pickUpWeapon) flags1 |= 1 << 7;
-      uint8[5] = flags1;
+    // Flags 1 (byte 5)
+    let flags1 = 0;
+    if (input.moveLeft) flags1 |= 1 << 0;
+    if (input.moveRight) flags1 |= 1 << 1;
+    if (input.boost) flags1 |= 1 << 2;
+    if (input.crouch) flags1 |= 1 << 3;
+    if (input.isShooting) flags1 |= 1 << 4;
+    if (input.throwGrenade) flags1 |= 1 << 5;
+    if (input.swapWeapon) flags1 |= 1 << 6;
+    if (input.pickUpWeapon) flags1 |= 1 << 7;
+    uint8[5] = flags1;
 
-      // Flags 2 (byte 6)
-      let flags2 = 0;
-      if (input.reload) flags2 |= 1 << 0;
-      if (input.melee) flags2 |= 1 << 1;
-      uint8[6] = flags2;
+    // Flags 2 (byte 6)
+    let flags2 = 0;
+    if (input.reload) flags2 |= 1 << 0;
+    if (input.melee) flags2 |= 1 << 1;
+    uint8[6] = flags2;
 
-      // AimAngle (bytes 7-10)
-      view.setFloat32(7, input.aimAngle, true);
+    // AimAngle (bytes 7-10)
+    view.setFloat32(7, input.aimAngle, true);
 
-      // GrenadeFuse (bytes 11-14)
-      view.setFloat32(11, input.grenadeFuse || 5.0, true);
+    // GrenadeFuse (bytes 11-14)
+    view.setFloat32(11, input.grenadeFuse || 5.0, true);
 
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(buf);
+      this.bytesOutWindow += buf.byteLength;
+      this.packetsOutWindow++;
+    } else if (this.dc && this.dc.readyState === 'open') {
       this.dc.send(buf);
       this.bytesOutWindow += buf.byteLength;
       this.packetsOutWindow++;
@@ -321,8 +406,12 @@ class NetworkManager {
   }
 
   private send(msg: any) {
-    if (this.dc && this.dc.readyState === 'open') {
-      const str = JSON.stringify(msg);
+    const str = JSON.stringify(msg);
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(str);
+      this.bytesOutWindow += str.length;
+      this.packetsOutWindow++;
+    } else if (this.dc && this.dc.readyState === 'open') {
       this.dc.send(str);
       this.bytesOutWindow += str.length;
       this.packetsOutWindow++;

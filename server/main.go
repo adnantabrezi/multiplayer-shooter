@@ -12,8 +12,15 @@ import (
 
 	"mini-militia-server/game"
 
+	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v3"
 )
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
 func main() {
 	port := os.Getenv("PORT")
@@ -22,6 +29,128 @@ func main() {
 	}
 
 	hub := game.NewHub()
+
+	// WebSocket Endpoint for Real-time Game Networking over TCP (Render Cloud compatible)
+	http.HandleFunc("/api/ws", func(w http.ResponseWriter, r *http.Request) {
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println("WebSocket Upgrade error:", err)
+			return
+		}
+		defer ws.Close()
+
+		clientID := fmt.Sprintf("client_%d", time.Now().UnixNano())
+		var clientRoom *game.Room
+		var clientConn *game.ClientConn
+		var connMu sync.Mutex
+
+		defer func() {
+			connMu.Lock()
+			if clientRoom != nil {
+				clientRoom.RemoveClient(clientID)
+				clientRoom = nil
+				clientConn = nil
+			}
+			connMu.Unlock()
+		}()
+
+		for {
+			messageType, message, err := ws.ReadMessage()
+			if err != nil {
+				break
+			}
+
+			connMu.Lock()
+			// Binary Input Packet (0x01)
+			if messageType == websocket.BinaryMessage || (len(message) > 0 && message[0] == game.PacketTypeInput) {
+				if input, ok := game.DecodeBinaryInput(message); ok {
+					if clientRoom != nil {
+						clientRoom.ProcessInput(clientID, input)
+					}
+				}
+				connMu.Unlock()
+				continue
+			}
+
+			// Text / JSON Message
+			var clientMsg game.ClientMessage
+			err = json.Unmarshal(message, &clientMsg)
+			if err != nil {
+				connMu.Unlock()
+				continue
+			}
+
+			switch clientMsg.Type {
+			case "create_room":
+				if clientRoom != nil {
+					clientRoom.RemoveClient(clientID)
+					clientRoom = nil
+					clientConn = nil
+				}
+
+				mapID := clientMsg.MapID
+				if mapID == "" {
+					mapID = "outpost"
+				}
+				mode := clientMsg.Mode
+				if mode == "" {
+					mode = "custom"
+				}
+				room := hub.CreateRoom(clientMsg.RoomCode, mapID, mode, clientMsg.BotCount, clientMsg.BotDifficulty, clientMsg.MatchDuration)
+				clientRoom = room
+				clientConn = room.AddClientWS(ws, clientID, clientMsg.Avatar)
+
+			case "join_room":
+				if clientRoom != nil {
+					clientRoom.RemoveClient(clientID)
+					clientRoom = nil
+					clientConn = nil
+				}
+
+				code := clientMsg.RoomCode
+				room, exists := hub.GetRoom(code)
+				if !exists {
+					errMsg := game.ServerMessage{
+						Type:  "error",
+						Error: "Room not found. Please check room code or create a new room!",
+					}
+					if clientConn != nil {
+						clientConn.WriteJSON(errMsg)
+					} else {
+						ws.WriteJSON(errMsg)
+					}
+					connMu.Unlock()
+					continue
+				}
+				clientRoom = room
+				clientConn = room.AddClientWS(ws, clientID, clientMsg.Avatar)
+
+			case "input":
+				if clientRoom != nil {
+					clientRoom.ProcessInput(clientID, clientMsg.Input)
+				}
+
+			case "ping":
+				pongMsg := game.ServerMessage{
+					Type:   "pong",
+					PingTs: clientMsg.Timestamp,
+				}
+				if clientConn != nil {
+					clientConn.WriteJSON(pongMsg)
+				} else {
+					ws.WriteJSON(pongMsg)
+				}
+
+			case "leave_room":
+				if clientRoom != nil {
+					clientRoom.RemoveClient(clientID)
+					clientRoom = nil
+					clientConn = nil
+				}
+			}
+			connMu.Unlock()
+		}
+	})
 
 	// REST Endpoint: List Rooms
 	http.HandleFunc("/api/rooms", func(w http.ResponseWriter, r *http.Request) {
@@ -247,7 +376,7 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		if r.URL.Path == "/api/rooms" || r.URL.Path == "/api/rtc/offer" {
+		if r.URL.Path == "/api/rooms" || r.URL.Path == "/api/rtc/offer" || r.URL.Path == "/api/ws" {
 			return
 		}
 

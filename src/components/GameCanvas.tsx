@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Bullet, EndMatchStats, GameMap, GameSettings, GrenadeEntity, KillFeedEntry, Particle, Player, WeaponPickup, HealthCrate } from '../types';
+import { AirDrop, BlueZoneState, Bullet, EndMatchStats, GameMap, GameSettings, GrenadeEntity, KillFeedEntry, Particle, Player, WeaponPickup, HealthCrate } from '../types';
 import { MAPS } from '../data/maps';
 import { WEAPONS, getWeapon } from '../data/weapons';
 import { updateBotAI } from '../game/botAI';
@@ -747,7 +747,7 @@ export const GameCanvas: React.FC<Props> = ({
     }
 
     if (hitTarget) {
-      shakeScreen(10);
+      soundEngine.playExplosion();
     }
 
     setTimeout(() => {

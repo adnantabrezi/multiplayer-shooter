@@ -8,12 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v3"
 )
 
 type ClientConn struct {
 	ID        string
 	DataChan  *webrtc.DataChannel
+	WSConn    *websocket.Conn
 	Player    *Player
 	LastInput ClientInput
 	writeMu   sync.Mutex
@@ -23,23 +25,29 @@ type ClientConn struct {
 func (c *ClientConn) WriteJSON(v interface{}) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if c.DataChan == nil || c.DataChan.ReadyState() != webrtc.DataChannelStateOpen {
-		return fmt.Errorf("datachannel not open")
+	if c.WSConn != nil {
+		return c.WSConn.WriteJSON(v)
 	}
-	bytes, err := json.Marshal(v)
-	if err != nil {
-		return err
+	if c.DataChan != nil && c.DataChan.ReadyState() == webrtc.DataChannelStateOpen {
+		bytes, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		return c.DataChan.SendText(string(bytes))
 	}
-	return c.DataChan.SendText(string(bytes))
+	return fmt.Errorf("connection closed")
 }
 
 func (c *ClientConn) WriteBinary(data []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if c.DataChan == nil || c.DataChan.ReadyState() != webrtc.DataChannelStateOpen {
-		return fmt.Errorf("datachannel not open")
+	if c.WSConn != nil {
+		return c.WSConn.WriteMessage(websocket.BinaryMessage, data)
 	}
-	return c.DataChan.Send(data)
+	if c.DataChan != nil && c.DataChan.ReadyState() == webrtc.DataChannelStateOpen {
+		return c.DataChan.Send(data)
+	}
+	return fmt.Errorf("connection closed")
 }
 
 
@@ -263,6 +271,70 @@ func (r *Room) AddClient(dc *webrtc.DataChannel, clientID string, avatar AvatarC
 	r.players = append(r.players, p)
 
 	// Send initial joined confirmation
+	msg := ServerMessage{
+		Type:     "joined",
+		RoomCode: r.Code,
+		MapID:    r.MapID,
+		ClientID: clientID,
+	}
+	c.WriteJSON(msg)
+
+	return c
+}
+
+func (r *Room) AddClientWS(ws *websocket.Conn, clientID string, avatar AvatarConfig) *ClientConn {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.clients[clientID]; exists {
+		delete(r.clients, clientID)
+		newPlayers := make([]*Player, 0, len(r.players))
+		for _, p := range r.players {
+			if p.ID != clientID {
+				newPlayers = append(newPlayers, p)
+			}
+		}
+		r.players = newPlayers
+	}
+
+	gameMap := Maps[r.MapID]
+	spawnPt := gameMap.Spawns[len(r.clients)%len(gameMap.Spawns)]
+
+	p := &Player{
+		ID:               clientID,
+		Name:             avatar.Name,
+		IsBot:            false,
+		Team:             "none",
+		Avatar:           avatar,
+		X:                spawnPt.X,
+		Y:                spawnPt.Y,
+		Radius:           18,
+		FacingRight:      true,
+		Health:           100,
+		MaxHealth:        100,
+		Nitro:            100,
+		MaxNitro:         100,
+		PrimaryWeapon:    "ar",
+		SecondaryWeapon:  "smg",
+		ActiveSlot:       "primary",
+		CurrentMag:       30,
+		ReserveAmmo:      120,
+		SecondaryMag:     35,
+		SecondaryReserve: 140,
+		FragCount:        3,
+		ActiveGrenade:    "frag",
+		Opacity:          1.0,
+	}
+
+	c := &ClientConn{
+		ID:     clientID,
+		WSConn: ws,
+		Player: p,
+	}
+
+	r.clients[clientID] = c
+	r.players = append(r.players, p)
+
 	msg := ServerMessage{
 		Type:     "joined",
 		RoomCode: r.Code,

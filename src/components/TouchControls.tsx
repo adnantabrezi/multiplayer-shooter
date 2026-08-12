@@ -36,6 +36,8 @@ export const TouchControls: React.FC<Props> = ({
   joystickPosition = 'bottom',
   onUpdateJoystickSettings
 }) => {
+  const leftStickRef = useRef<HTMLDivElement | null>(null);
+  const rightStickRef = useRef<HTMLDivElement | null>(null);
   const leftKnobRef = useRef<HTMLDivElement | null>(null);
   const rightKnobRef = useRef<HTMLDivElement | null>(null);
   const [showQuickSettings, setShowQuickSettings] = useState(false);
