@@ -225,17 +225,29 @@ type ClientInput struct {
 	Melee        bool    `json:"melee"`
 }
 
+type PlayerHit struct {
+	TargetID  string  `json:"targetId"`
+	Damage    float64 `json:"damage"`
+	ShooterID string  `json:"shooterId"`
+	Weapon    string  `json:"weapon"`
+}
+
 type ClientMessage struct {
-	Type          string       `json:"type"` // "create_room", "join_room", "leave_room", "input", "ping", "start_match"
-	RoomCode      string       `json:"roomCode"`
-	MapID         string       `json:"mapId"`
-	Mode          string       `json:"mode"`
-	BotCount      int          `json:"botCount"`
-	BotDifficulty string       `json:"botDifficulty"`
-	MatchDuration int          `json:"matchDuration,omitempty"`
-	Avatar        AvatarConfig `json:"avatar"`
-	Input         ClientInput  `json:"input"`
-	Timestamp     int64        `json:"timestamp"`
+	Type          string         `json:"type"` // "create_room", "join_room", "leave_room", "input", "player_state", "spawn_bullet", "spawn_grenade", "player_hit", "kill_event", "ping"
+	RoomCode      string         `json:"roomCode"`
+	MapID         string         `json:"mapId"`
+	Mode          string         `json:"mode"`
+	BotCount      int            `json:"botCount"`
+	BotDifficulty string         `json:"botDifficulty"`
+	MatchDuration int            `json:"matchDuration,omitempty"`
+	Avatar        AvatarConfig   `json:"avatar"`
+	Input         ClientInput    `json:"input"`
+	PlayerState   *Player        `json:"playerState,omitempty"`
+	Bullet        *Bullet        `json:"bullet,omitempty"`
+	Grenade       *GrenadeEntity `json:"grenade,omitempty"`
+	Hit           *PlayerHit     `json:"hit,omitempty"`
+	Kill          *KillFeedEntry `json:"kill,omitempty"`
+	Timestamp     int64          `json:"timestamp"`
 }
 
 type BlueZoneState struct {

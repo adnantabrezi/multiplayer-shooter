@@ -125,6 +125,29 @@ func main() {
 				clientRoom = room
 				clientConn = room.AddClientWS(ws, clientID, clientMsg.Avatar)
 
+			case "player_state":
+				if clientRoom != nil && clientMsg.PlayerState != nil {
+					clientRoom.ProcessPlayerState(clientID, clientMsg.PlayerState)
+				}
+
+			case "spawn_bullet", "spawn_grenade", "player_hit", "kill_event":
+				if clientRoom != nil {
+					relayMsg := game.ServerMessage{
+						Type:     clientMsg.Type,
+						ClientID: clientID,
+					}
+					if clientMsg.Bullet != nil {
+						relayMsg.Bullets = []game.Bullet{*clientMsg.Bullet}
+					}
+					if clientMsg.Grenade != nil {
+						relayMsg.Grenades = []game.GrenadeEntity{*clientMsg.Grenade}
+					}
+					if clientMsg.Kill != nil {
+						relayMsg.KillFeed = []game.KillFeedEntry{*clientMsg.Kill}
+					}
+					clientRoom.RelayMessage(clientID, relayMsg)
+				}
+
 			case "input":
 				if clientRoom != nil {
 					clientRoom.ProcessInput(clientID, clientMsg.Input)
@@ -276,6 +299,29 @@ func main() {
 					}
 					clientRoom = room
 					clientConn = room.AddClient(dc, clientID, clientMsg.Avatar)
+
+				case "player_state":
+					if clientRoom != nil && clientMsg.PlayerState != nil {
+						clientRoom.ProcessPlayerState(clientID, clientMsg.PlayerState)
+					}
+
+				case "spawn_bullet", "spawn_grenade", "player_hit", "kill_event":
+					if clientRoom != nil {
+						relayMsg := game.ServerMessage{
+							Type:     clientMsg.Type,
+							ClientID: clientID,
+						}
+						if clientMsg.Bullet != nil {
+							relayMsg.Bullets = []game.Bullet{*clientMsg.Bullet}
+						}
+						if clientMsg.Grenade != nil {
+							relayMsg.Grenades = []game.GrenadeEntity{*clientMsg.Grenade}
+						}
+						if clientMsg.Kill != nil {
+							relayMsg.KillFeed = []game.KillFeedEntry{*clientMsg.Kill}
+						}
+						clientRoom.RelayMessage(clientID, relayMsg)
+					}
 
 				case "input":
 					if clientRoom != nil {

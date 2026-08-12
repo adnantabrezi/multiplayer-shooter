@@ -585,15 +585,16 @@ export const GameCanvas: React.FC<Props> = ({
     // Spawn Bullets / Projectiles
     for (let i = 0; i < w.bulletsPerShot; i++) {
       const spreadAngle = angle + (Math.random() - 0.5) * w.spread;
-      bulletsRef.current.push({
-        id: `bullet_${Math.random()}`,
-        shooterId: p.id,
+      const b: Bullet = {
+        id: `b_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        shooterId: p.id === 'human_1' ? (networkManager.clientId || 'human_1') : p.id,
         weaponType: w.id,
         x: startX,
         y: startY,
         vx: Math.cos(spreadAngle) * w.bulletSpeed,
         vy: Math.sin(spreadAngle) * w.bulletSpeed,
         damage: w.damage,
+        color: w.color,
         radius: 3,
         life: 80,
         maxLife: 80,
@@ -603,7 +604,11 @@ export const GameCanvas: React.FC<Props> = ({
         isExplosive: false,
         isFlame: false,
         isLaser: false
-      });
+      };
+      bulletsRef.current.push(b);
+      if (isMultiplayer && (p.id === 'human_1' || p.id === networkManager.clientId)) {
+        networkManager.sendBulletSpawn(b);
+      }
     }
   };
 
@@ -699,18 +704,20 @@ export const GameCanvas: React.FC<Props> = ({
     pendingGrenadeFuseRef.current = Math.max(0.05, remainingFuse);
     soundEngine.playWeaponShoot('throw');
 
-    if (!isMultiplayer) {
-      const speed = 12;
-      grenadesRef.current.push({
-        id: `grenade_${Math.random()}`,
-        shooterId: p.id,
-        type: p.activeGrenade,
-        x: p.x,
-        y: p.y - 10,
-        vx: Math.cos(p.aimAngle) * speed,
-        vy: Math.sin(p.aimAngle) * speed,
-        timer: Math.max(50, remainingFuse * 1000)
-      });
+    const speed = 12;
+    const g: GrenadeEntity = {
+      id: `gren_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      shooterId: p.id === 'human_1' ? (networkManager.clientId || 'human_1') : p.id,
+      type: p.activeGrenade,
+      x: p.x,
+      y: p.y - 10,
+      vx: Math.cos(p.aimAngle) * speed,
+      vy: Math.sin(p.aimAngle) * speed,
+      timer: Math.max(0.1, remainingFuse)
+    };
+    grenadesRef.current.push(g);
+    if (isMultiplayer) {
+      networkManager.sendGrenadeSpawn(g);
     }
   };
 
@@ -754,6 +761,10 @@ export const GameCanvas: React.FC<Props> = ({
         other.lastDamageTime = Date.now();
         p.damageDealt += 65;
         soundEngine.playHitMarker(false);
+
+        if (isMultiplayer) {
+          networkManager.sendPlayerHit(other.id, 65, 'Gun Smash Melee');
+        }
 
         // Massive Knockback Impulse launching opponent across the screen!
         other.vx += Math.cos(p.aimAngle) * 24.0;
@@ -963,6 +974,13 @@ export const GameCanvas: React.FC<Props> = ({
         }
 
         updatePlayerPhysics(human, map, { moveLeft, moveRight, boost, crouch, aimAngle }, dt);
+
+        if (isMultiplayer && human) {
+          networkManager.sendPlayerState({
+            ...human,
+            id: networkManager.clientId || 'human_1'
+          });
+        }
 
         // Jetpack audio feedback
         if (boost && human.nitro > 0) soundEngine.startJetpack();

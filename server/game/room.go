@@ -543,9 +543,50 @@ func (r *Room) ProcessInput(clientID string, input ClientInput) {
 	_ = gameMap
 }
 
+func (r *Room) ProcessPlayerState(clientID string, state *Player) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	c, ok := r.clients[clientID]
+	if !ok || state == nil {
+		return
+	}
+
+	state.ID = clientID
+	c.Player = state
+
+	found := false
+	for i, p := range r.players {
+		if p.ID == clientID {
+			r.players[i] = state
+			found = true
+			break
+		}
+	}
+	if !found {
+		r.players = append(r.players, state)
+	}
+}
+
+func (r *Room) RelayMessage(senderID string, msg ServerMessage) {
+	r.mu.RLock()
+	clientsSlice := make([]*ClientConn, 0, len(r.clients))
+	for id, c := range r.clients {
+		if id != senderID {
+			clientsSlice = append(clientsSlice, c)
+		}
+	}
+	r.mu.RUnlock()
+
+	for _, c := range clientsSlice {
+		go func(conn *ClientConn) {
+			_ = conn.WriteJSON(msg)
+		}(c)
+	}
+}
+
 func (r *Room) runLoop() {
-	ticker := time.NewTicker(time.Second / 60) // 60Hz Physics Timestep (Normal Game Speed)
-	const snapshotInterval = 2 // broadcast snapshot every 2nd tick = 30Hz for ultra-smooth gameplay
+	ticker := time.NewTicker(time.Second / 30) // 30Hz Lightweight Snapshot Ticker (Near 0% CPU)
 	defer ticker.Stop()
 
 	lastTime := time.Now()
@@ -560,216 +601,11 @@ func (r *Room) runLoop() {
 			lastTime = now
 
 			r.mu.Lock()
-			gameMap := Maps[r.MapID]
 			r.tickSeq++
-			r.TimeRemaining = math.Max(0, r.TimeRemaining-(dt))
-
-			// 1. Process Player Physics & Bot AI
-			for _, p := range r.players {
-				if p.IsMeleeAttacking {
-					p.MeleeTimer -= dt
-					if p.MeleeTimer <= 0 {
-						p.IsMeleeAttacking = false
-						p.MeleeTimer = 0
-					}
-				}
-
-				if p.IsDead {
-					p.RespawnTimer -= dt
-					if p.RespawnTimer <= 0 {
-						p.IsDead = false
-						p.Health = p.MaxHealth
-						p.Nitro = p.MaxNitro
-
-						// Reset Weapons & Ammo loadout on respawn
-						p.PrimaryWeapon = "ar"
-						p.SecondaryWeapon = "smg"
-						p.ActiveSlot = "primary"
-						if w, ok := Weapons[p.PrimaryWeapon]; ok {
-							p.CurrentMag = w.MagazineSize
-							p.ReserveAmmo = w.ReserveAmmo
-						}
-						if w, ok := Weapons[p.SecondaryWeapon]; ok {
-							p.SecondaryMag = w.MagazineSize
-							p.SecondaryReserve = w.ReserveAmmo
-						}
-						p.FragCount = 3
-						p.IsReloading = false
-						p.ReloadProgress = 0
-
-						spawnPt := gameMap.Spawns[rand.Intn(len(gameMap.Spawns))]
-						p.X = spawnPt.X
-						p.Y = spawnPt.Y
-						p.Vx = 0
-						p.Vy = 0
-					}
-					continue
-				}
-
-				var input ClientInput
-				if p.IsBot {
-					botInput, shouldShoot, shouldGrenade := UpdateServerBotAI(p, r.players, r.pickups, gameMap, dt)
-					input = botInput
-					w := GetWeapon(p.PrimaryWeapon)
-					if shouldShoot && time.Now().UnixMilli()-p.LastShotTime > int64(1000.0/w.FireRate) {
-						p.LastShotTime = time.Now().UnixMilli()
-						r.bullets = append(r.bullets, Bullet{
-							ID:               fmt.Sprintf("b_bot_%d", time.Now().UnixNano()),
-							ShooterID:        p.ID,
-							WeaponType:       w.ID,
-							X:                p.X,
-							Y:                p.Y,
-							Vx:               math.Cos(input.AimAngle) * w.BulletSpeed,
-							Vy:               math.Sin(input.AimAngle) * w.BulletSpeed,
-							Damage:           w.Damage,
-							Color:            w.Color,
-							Radius:           3,
-							Life:             80,
-							MaxLife:          80,
-							MaxRange:         w.MaxRange,
-							DistanceTraveled: 0,
-							Alpha:            1.0,
-						})
-					}
-					if shouldGrenade && p.FragCount > 0 {
-						p.FragCount--
-						r.grenades = append(r.grenades, GrenadeEntity{
-							ID:        fmt.Sprintf("g_bot_%d", time.Now().UnixNano()),
-							ShooterID: p.ID,
-							Type:      "frag",
-							X:         p.X,
-							Y:         p.Y,
-							Vx:        math.Cos(input.AimAngle) * 12,
-							Vy:        math.Sin(input.AimAngle) * 12,
-							Timer:     3.0,
-						})
-					}
-				} else {
-					if c, ok := r.clients[p.ID]; ok {
-						c.Mu.Lock()
-						input = c.LastInput
-						c.Mu.Unlock()
-					}
-				}
-
-				UpdatePlayerPhysics(p, gameMap, input, dt)
-
-				if p.IsReloading {
-					p.ReloadProgress += dt * 1000.0
-					w := GetWeapon(p.PrimaryWeapon)
-					if p.ReloadProgress >= float64(w.ReloadTime) {
-						needed := w.MagazineSize - p.CurrentMag
-						amount := needed
-						if p.ReserveAmmo < amount {
-							amount = p.ReserveAmmo
-						}
-						p.CurrentMag += amount
-						p.ReserveAmmo -= amount
-						p.IsReloading = false
-						p.ReloadProgress = 0
-					}
-				}
-			}
-
-			// 2. Update Bullets
-			var newGrenades []GrenadeEntity
-			r.bullets, newGrenades = UpdateBullets(r.bullets, r.players, gameMap, dt, func(killer, victim *Player, weapon string, isHeadshot bool) {
-				kName := "World"
-				kTeam := "none"
-				if killer != nil {
-					kName = killer.Name
-					kTeam = killer.Team
-				}
-				r.killFeed = append(r.killFeed, KillFeedEntry{
-					ID:         fmt.Sprintf("kf_%d", time.Now().UnixNano()),
-					KillerName: kName,
-					KillerTeam: kTeam,
-					VictimName: victim.Name,
-					VictimTeam: victim.Team,
-					WeaponUsed: weapon,
-					IsHeadshot: isHeadshot,
-					Timestamp:  time.Now().UnixMilli(),
-				})
-				if len(r.killFeed) > 5 {
-					r.killFeed = r.killFeed[len(r.killFeed)-5:]
-				}
-			})
-			r.grenades = append(r.grenades, newGrenades...)
-
-			// 3. Update Grenades
-			var grenadeExplosions []Explosion
-			r.grenades, grenadeExplosions = UpdateGrenades(r.grenades, r.players, gameMap, dt, func(killer, victim *Player, weapon string, isHeadshot bool) {
-				kName := "World"
-				kTeam := "none"
-				if killer != nil {
-					kName = killer.Name
-					kTeam = killer.Team
-				}
-				r.killFeed = append(r.killFeed, KillFeedEntry{
-					ID:         fmt.Sprintf("kf_%d", time.Now().UnixNano()),
-					KillerName: kName,
-					KillerTeam: kTeam,
-					VictimName: victim.Name,
-					VictimTeam: victim.Team,
-					WeaponUsed: weapon,
-					IsHeadshot: isHeadshot,
-					Timestamp:  time.Now().UnixMilli(),
-				})
-			})
-			r.explosions = append(r.explosions, grenadeExplosions...)
-
-			// 4. Update Weapon, Health, & Nitro Booster Pickups
-			r.pickups, r.healthCrates, r.boosterCrates = UpdatePickupsAndHealth(r.pickups, r.healthCrates, r.boosterCrates, r.players, dt)
-
-			// 5. Authoritative PUBG Blue Zone & Air Drop Processing
-			if r.GameMode == "battle-royale" && r.blueZone != nil {
-				bz := r.blueZone
-				bz.ShrinkTimer -= dt
-
-				if bz.ShrinkTimer <= 0 {
-					if !bz.IsShrinking {
-						bz.IsShrinking = true
-						bz.Phase++
-						bz.TargetRadius = math.Max(120, bz.CurrentRadius*0.55)
-						bz.ShrinkTimer = 15.0
-					} else {
-						bz.IsShrinking = false
-						bz.ShrinkTimer = 20.0
-					}
-				}
-
-				if bz.IsShrinking && bz.CurrentRadius > bz.TargetRadius {
-					bz.CurrentRadius -= dt * 20.0
-				}
-
-				for _, p := range r.players {
-					if p.IsDead {
-						continue
-					}
-					dist := math.Hypot(p.X-bz.CenterX, p.Y-bz.CenterY)
-					if dist > bz.CurrentRadius {
-						p.Health -= dt * bz.DamagePerSec
-						p.LastDamageTime = time.Now().UnixMilli()
-						if p.Health <= 0 {
-							p.Health = 0
-							p.IsDead = true
-							p.Deaths++
-						}
-					}
-				}
-			}
-
-			// Throttle snapshot broadcast to 20Hz (every 3rd physics tick)
-			r.snapshotCounter++
-			shouldBroadcast := r.snapshotCounter >= snapshotInterval
-			if shouldBroadcast {
-				r.snapshotCounter = 0
-			}
+			r.TimeRemaining = math.Max(0, r.TimeRemaining-dt)
 			r.mu.Unlock()
 
-			if shouldBroadcast {
-				r.broadcastSnapshot()
-			}
+			r.broadcastSnapshot()
 		}
 	}
 }
@@ -782,11 +618,9 @@ func (r *Room) broadcastSnapshot() {
 		playersSlice[i] = *p
 	}
 
-	// Capture and clear pending explosions
 	explosions := r.explosions
 	r.explosions = r.explosions[:0]
 
-	// Copy client connections slice to write JSON outside lock
 	clientsSlice := make([]*ClientConn, 0, len(r.clients))
 	for _, c := range r.clients {
 		clientsSlice = append(clientsSlice, c)
@@ -813,7 +647,6 @@ func (r *Room) broadcastSnapshot() {
 
 	binMsg := EncodeBinarySnapshot(&msg)
 
-	// Perform WebRTC WriteBinary outside of room lock so slow network buffers never block physics tick!
 	for _, c := range clientsSlice {
 		go c.WriteBinary(binMsg)
 	}

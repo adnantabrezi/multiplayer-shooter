@@ -355,6 +355,46 @@ class NetworkManager {
     this.currentRoomCode = '';
   }
 
+  public sendPlayerState(player: Player) {
+    this.send({
+      type: 'player_state',
+      playerState: player
+    });
+  }
+
+  public sendBulletSpawn(bullet: Bullet) {
+    this.send({
+      type: 'spawn_bullet',
+      bullet
+    });
+  }
+
+  public sendGrenadeSpawn(grenade: GrenadeEntity) {
+    this.send({
+      type: 'spawn_grenade',
+      grenade
+    });
+  }
+
+  public sendPlayerHit(targetId: string, damage: number, weapon: string) {
+    this.send({
+      type: 'player_hit',
+      hit: {
+        targetId,
+        damage,
+        shooterId: this.clientId,
+        weapon
+      }
+    });
+  }
+
+  public sendKillEvent(kill: KillFeedEntry) {
+    this.send({
+      type: 'kill_event',
+      kill
+    });
+  }
+
   public sendInput(input: Omit<ClientInputState, 'seq'>): number {
     this.inputSeq++;
 
