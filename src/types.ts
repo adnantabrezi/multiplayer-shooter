@@ -129,6 +129,11 @@ export interface Player {
   // Visuals
   opacity: number; // reduced in bushes
   inBush: boolean;
+
+  // Smoothing & Interpolation Targets
+  targetX?: number;
+  targetY?: number;
+  targetAimAngle?: number;
 }
 
 export interface Bullet {

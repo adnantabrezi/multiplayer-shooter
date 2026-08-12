@@ -379,18 +379,18 @@ export const GameCanvas: React.FC<Props> = ({
         }
 
         const serverId = networkManager.clientId || 'human_1';
-
-        // Use a Map keyed by player ID to prevent any duplicates
         const playerMap = new Map<string, Player>();
 
-        for (const interpP of interpolatedPlayers) {
+        const rawServerPlayers = snapshot.players || interpolatedPlayers || [];
+
+        for (const interpP of rawServerPlayers) {
           const isLocalPlayer = interpP.id === serverId;
 
           if (isLocalPlayer) {
             // Merge server-authoritative state into the locally-predicted player
             const existingLocal = playersRef.current.find((p) => p.id === 'human_1' || p.id === serverId);
             if (existingLocal) {
-              existingLocal.id = 'human_1'; // Normalize to human_1 for local lookups
+              existingLocal.id = 'human_1';
               existingLocal.health = interpP.health;
               existingLocal.nitro = interpP.nitro;
               existingLocal.kills = interpP.kills;
@@ -402,17 +402,52 @@ export const GameCanvas: React.FC<Props> = ({
               existingLocal.reserveAmmo = interpP.reserveAmmo;
               existingLocal.isReloading = interpP.isReloading;
               existingLocal.reloadProgress = interpP.reloadProgress;
-              if (Math.hypot(existingLocal.x - interpP.x, existingLocal.y - interpP.y) > 40) {
+
+              // Smoothly blend local player position if server & client drift > 60px
+              const drift = Math.hypot(existingLocal.x - interpP.x, existingLocal.y - interpP.y);
+              if (drift > 200) {
                 existingLocal.x = interpP.x;
                 existingLocal.y = interpP.y;
+              } else if (drift > 60) {
+                existingLocal.x = existingLocal.x * 0.5 + interpP.x * 0.5;
+                existingLocal.y = existingLocal.y * 0.5 + interpP.y * 0.5;
               }
               playerMap.set('human_1', existingLocal);
             } else {
               playerMap.set('human_1', { ...interpP, id: 'human_1' });
             }
           } else {
-            // Remote player — use their actual ID, dedup via Map
-            playerMap.set(interpP.id, interpP);
+            // Remote player — track target positions for 60FPS continuous interpolation
+            const existingRemote = playersRef.current.find((p) => p.id === interpP.id);
+            if (existingRemote) {
+              existingRemote.targetX = interpP.x;
+              existingRemote.targetY = interpP.y;
+              existingRemote.targetAimAngle = interpP.aimAngle;
+              existingRemote.vx = interpP.vx;
+              existingRemote.vy = interpP.vy;
+              existingRemote.health = interpP.health;
+              existingRemote.maxHealth = interpP.maxHealth;
+              existingRemote.isDead = interpP.isDead;
+              existingRemote.primaryWeapon = interpP.primaryWeapon;
+              existingRemote.secondaryWeapon = interpP.secondaryWeapon;
+              existingRemote.currentMag = interpP.currentMag;
+              existingRemote.reserveAmmo = interpP.reserveAmmo;
+              existingRemote.facingRight = interpP.facingRight;
+              existingRemote.isBoosting = interpP.isBoosting;
+              existingRemote.isCrouching = interpP.isCrouching;
+              existingRemote.isMeleeAttacking = interpP.isMeleeAttacking;
+              existingRemote.kills = interpP.kills;
+              existingRemote.deaths = interpP.deaths;
+              existingRemote.avatar = interpP.avatar;
+              playerMap.set(interpP.id, existingRemote);
+            } else {
+              playerMap.set(interpP.id, {
+                ...interpP,
+                targetX: interpP.x,
+                targetY: interpP.y,
+                targetAimAngle: interpP.aimAngle
+              });
+            }
           }
         }
         playersRef.current = Array.from(playerMap.values());
@@ -971,23 +1006,33 @@ export const GameCanvas: React.FC<Props> = ({
         }
       }
 
-      // --- PER-FRAME 60FPS REMOTE PLAYER INTERPOLATION (Multiplayer) ---
+      // --- PER-FRAME 60FPS ULTRA-SMOOTH REMOTE PLAYER INTERPOLATION (Multiplayer) ---
       if (isMultiplayer) {
-        const interpolatedRemote = networkManager.getInterpolatedPlayers();
         const serverId = networkManager.clientId || 'human_1';
         playersRef.current.forEach((p) => {
           if (p.id !== 'human_1' && p.id !== serverId) {
-            const interpP = interpolatedRemote.find((ip) => ip.id === p.id);
-            if (interpP) {
-              p.x = interpP.x;
-              p.y = interpP.y;
-              p.aimAngle = interpP.aimAngle;
-              p.facingRight = interpP.facingRight;
-              p.isBoosting = interpP.isBoosting;
-              p.isCrouching = interpP.isCrouching;
-              p.isMeleeAttacking = interpP.isMeleeAttacking;
-              p.health = interpP.health;
-              p.isDead = interpP.isDead;
+            if (p.targetX !== undefined && p.targetY !== undefined) {
+              const dx = p.targetX - p.x;
+              const dy = p.targetY - p.y;
+              const dist = Math.hypot(dx, dy);
+
+              if (dist > 200 || p.isDead) {
+                // Instantly snap on respawns / teleports
+                p.x = p.targetX;
+                p.y = p.targetY;
+              } else if (dist > 0.05) {
+                // Smooth 60FPS exponential glide with velocity dead-reckoning towards target
+                const blend = Math.min(1.0, (dt / 1000) * 22.0); // ~0.35 per frame at 60fps
+                p.x += dx * blend + (p.vx || 0) * (dt / 1000) * 0.5;
+                p.y += dy * blend + (p.vy || 0) * (dt / 1000) * 0.5;
+              }
+            }
+
+            if (p.targetAimAngle !== undefined) {
+              let diff = p.targetAimAngle - p.aimAngle;
+              while (diff < -Math.PI) diff += Math.PI * 2;
+              while (diff > Math.PI) diff -= Math.PI * 2;
+              p.aimAngle += diff * Math.min(1.0, (dt / 1000) * 22.0);
             }
           }
         });

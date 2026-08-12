@@ -545,7 +545,7 @@ func (r *Room) ProcessInput(clientID string, input ClientInput) {
 
 func (r *Room) runLoop() {
 	ticker := time.NewTicker(time.Second / 60) // 60Hz Physics Timestep (Normal Game Speed)
-	const snapshotInterval = 3 // broadcast snapshot every 3rd tick = 20Hz
+	const snapshotInterval = 2 // broadcast snapshot every 2nd tick = 30Hz for ultra-smooth gameplay
 	defer ticker.Stop()
 
 	lastTime := time.Now()
