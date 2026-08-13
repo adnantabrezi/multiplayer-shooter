@@ -977,7 +977,9 @@ export const GameCanvas: React.FC<Props> = ({
         const crouch = keysRef.current['KeyS'] || keysRef.current['ArrowDown'] || keysRef.current['s'] || keysRef.current['S'] || touchInputsRef.current.isCrouching;
 
         // Calculate Mouse Aim angle relative to exact player screen position
-        const zoomFactor = scopeZoom === '8X' ? 0.45 : scopeZoom === '4X' ? 0.65 : scopeZoom === '2X' ? 0.82 : 1.0;
+        const isMobileView = canvas.width < 768 || window.innerWidth < 768 || settings.showTouchControls;
+        const baseZoom = isMobileView ? 0.65 : 1.0;
+        const zoomFactor = scopeZoom === '8X' ? baseZoom * 0.45 : scopeZoom === '4X' ? baseZoom * 0.65 : scopeZoom === '2X' ? baseZoom * 0.82 : baseZoom;
 
         let aimAngle = human.aimAngle;
         if (settings.showTouchControls) {
@@ -1353,7 +1355,9 @@ export const GameCanvas: React.FC<Props> = ({
       // --- RENDER CAMERA VIEWPORT ---
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const zoomFactor = scopeZoom === '8X' ? 0.45 : scopeZoom === '4X' ? 0.65 : scopeZoom === '2X' ? 0.82 : 1.0;
+      const isMobileView = canvas.width < 768 || window.innerWidth < 768 || settings.showTouchControls;
+      const baseZoom = isMobileView ? 0.65 : 1.0;
+      const zoomFactor = scopeZoom === '8X' ? baseZoom * 0.45 : scopeZoom === '4X' ? baseZoom * 0.65 : scopeZoom === '2X' ? baseZoom * 0.82 : baseZoom;
 
       const targetCamX = human ? human.x - (canvas.width / zoomFactor) / 2 : map.width / 2;
       const targetCamY = human ? human.y - (canvas.height / zoomFactor) / 2 : map.height / 2;
@@ -1975,8 +1979,8 @@ export const GameCanvas: React.FC<Props> = ({
       {/* Middle Bottom Tactical Weapon Inventory & Ammo HUD Bar (3X Scale for clear visibility) */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 pointer-events-auto flex flex-col items-center gap-1.5 select-none scale-[1.85] sm:scale-[2.3] origin-bottom">
 
-        {/* Tactical Weapon Bar Container */}
-        <div className="flex items-center bg-[#1e242b]/95 border-2 border-white/30 rounded-xl overflow-hidden shadow-2xl backdrop-blur-md">
+        {/* Transparent Tactical Weapon Bar (No Background) */}
+        <div className="flex items-center gap-2 bg-transparent p-0 drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
 
           {/* Box 1: Active Weapon Silhouette */}
           <div
@@ -1984,11 +1988,11 @@ export const GameCanvas: React.FC<Props> = ({
               const human = playersRef.current.find(p => p.id === 'human_1');
               if (human) swapWeapon(human);
             }}
-            className={`relative flex items-center justify-center px-3 py-1.5 bg-[#2a3038] border-r border-white/10 transition-all cursor-pointer ${hudState.isDrawAnim ? 'bg-[#374151] ring-2 ring-yellow-400 shadow-[0_0_12px_rgba(250,204,21,0.5)]' : 'hover:bg-[#343b44]'
+            className={`relative flex items-center justify-center px-2 py-1 bg-transparent transition-all cursor-pointer ${hudState.isDrawAnim ? 'scale-110 drop-shadow-[0_0_10px_rgba(250,204,21,0.9)]' : 'hover:scale-105'
               }`}
             title="Active Primary Weapon"
           >
-            <WeaponSilhouette type={hudState.primaryWeapon} className="w-16 h-8 text-white drop-shadow" />
+            <WeaponSilhouette type={hudState.primaryWeapon} className="w-16 h-8 text-white drop-shadow-md" />
           </div>
 
           {/* Box 2: Secondary Inventory Weapon Slot */}
@@ -1998,21 +2002,21 @@ export const GameCanvas: React.FC<Props> = ({
                 const human = playersRef.current.find(p => p.id === 'human_1');
                 if (human) swapWeapon(human);
               }}
-              className="relative flex items-center justify-center px-2.5 py-1.5 bg-[#22272e] border-r border-white/10 hover:bg-[#2b313a] transition-all cursor-pointer group"
+              className="relative flex items-center justify-center px-1.5 py-1 bg-transparent hover:scale-105 transition-all cursor-pointer group"
               title="Press Q or click to swap to Secondary Weapon"
             >
-              <span className="absolute top-0.5 left-1 text-[7px] font-mono font-black text-yellow-400/80 group-hover:text-yellow-400 transition">
-                [ Q ]
+              <span className="absolute -top-1 left-0 text-[7px] font-mono font-black text-yellow-400 drop-shadow-md">
+                [Q]
               </span>
-              <WeaponSilhouette type={hudState.secondaryWeapon} className="w-12 h-6 text-gray-400 group-hover:text-white transition opacity-70 group-hover:opacity-100" />
+              <WeaponSilhouette type={hudState.secondaryWeapon} className="w-12 h-6 text-gray-300 group-hover:text-white transition opacity-80 group-hover:opacity-100 drop-shadow-md" />
             </div>
           )}
 
           {/* Box 3: Ammo Count Box */}
-          <div className="flex flex-col justify-center px-3 py-1 bg-[#2a3038] border-r border-white/10 text-white font-mono min-w-[54px]">
+          <div className="flex flex-col justify-center px-2 py-1 bg-transparent text-white font-mono min-w-[48px] drop-shadow-md">
             {hudState.isReloading ? (
               <div className="text-center">
-                <span className="text-[9px] font-black text-yellow-400 animate-pulse block">RELOAD</span>
+                <span className="text-[9px] font-black text-yellow-400 animate-pulse block drop-shadow-md">RELOAD</span>
                 <div className="w-10 bg-black/60 h-1 rounded overflow-hidden mt-0.5 border border-yellow-400/40">
                   <div
                     className="bg-yellow-400 h-full transition-all duration-75"
@@ -2024,11 +2028,11 @@ export const GameCanvas: React.FC<Props> = ({
               </div>
             ) : (
               <>
-                <div className="text-base font-black leading-none text-white tracking-tight">
+                <div className="text-base font-black leading-none text-white tracking-tight drop-shadow-md">
                   {hudState.ammo}
                 </div>
-                <div className="flex items-center gap-1 text-[10px] text-gray-400 font-semibold mt-0.5">
-                  <AmmoStackIcon className="text-gray-400" />
+                <div className="flex items-center gap-1 text-[10px] text-gray-300 font-semibold mt-0.5 drop-shadow-md">
+                  <AmmoStackIcon className="text-gray-300" />
                   <span>{hudState.reserve}</span>
                 </div>
               </>
@@ -2041,22 +2045,22 @@ export const GameCanvas: React.FC<Props> = ({
               const human = playersRef.current.find(p => p.id === 'human_1');
               if (human) throwGrenade(human);
             }}
-            className="relative flex items-center justify-center px-2.5 py-1.5 bg-[#2a3038] border-r border-white/10 hover:bg-[#343b44] transition-all cursor-pointer"
+            className="relative flex items-center justify-center px-1.5 py-1 bg-transparent hover:scale-105 transition-all cursor-pointer drop-shadow-md"
             title="Press G or click to throw Frag Grenade"
           >
             <GrenadeSilhouette className="text-white" />
-            <span className="ml-1 text-xs font-black font-mono text-white">
+            <span className="ml-1 text-xs font-black font-mono text-white drop-shadow-md">
               {hudState.grenadeCount}
             </span>
           </div>
 
           {/* Box 5: Equipment / Radio Utility Box */}
           <div
-            className="relative flex items-center justify-center px-2.5 py-1.5 bg-[#2a3038]"
+            className="relative flex items-center justify-center px-1.5 py-1 bg-transparent drop-shadow-md"
             title="Tactical Radio Equipment"
           >
             <RadioSilhouette className="text-white" />
-            <span className="ml-1 text-xs font-black font-mono text-white">
+            <span className="ml-1 text-xs font-black font-mono text-white drop-shadow-md">
               1
             </span>
           </div>

@@ -40,6 +40,8 @@ export const TouchControls: React.FC<Props> = ({
   const rightStickRef = useRef<HTMLDivElement | null>(null);
   const leftKnobRef = useRef<HTMLDivElement | null>(null);
   const rightKnobRef = useRef<HTMLDivElement | null>(null);
+  const leftTouchIdRef = useRef<number | null>(null);
+  const rightTouchIdRef = useRef<number | null>(null);
   const [showQuickSettings, setShowQuickSettings] = useState(false);
 
   // Size dimensions map
@@ -79,22 +81,44 @@ export const TouchControls: React.FC<Props> = ({
 
   const handleLeftTouchStart = (e: React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
-    const touch = e.touches[0];
-    if (touch) processLeftTouch(touch.clientX, touch.clientY);
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      leftTouchIdRef.current = touch.identifier;
+      processLeftTouch(touch.clientX, touch.clientY);
+      break;
+    }
   };
 
   const handleLeftTouchMove = (e: React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
-    const touch = e.touches[0];
-    if (touch) processLeftTouch(touch.clientX, touch.clientY);
+    if (leftTouchIdRef.current === null) return;
+    for (let i = 0; i < e.touches.length; i++) {
+      const touch = e.touches[i];
+      if (touch.identifier === leftTouchIdRef.current) {
+        processLeftTouch(touch.clientX, touch.clientY);
+        break;
+      }
+    }
   };
 
   const handleLeftTouchEnd = (e?: React.TouchEvent) => {
     if (e && e.cancelable) e.preventDefault();
-    if (leftKnobRef.current) {
-      leftKnobRef.current.style.transform = 'translate(0px, 0px)';
+    let shouldReset = !e;
+    if (e && leftTouchIdRef.current !== null) {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === leftTouchIdRef.current) {
+          shouldReset = true;
+          break;
+        }
+      }
     }
-    onMove(0, 0, false, false);
+    if (shouldReset) {
+      leftTouchIdRef.current = null;
+      if (leftKnobRef.current) {
+        leftKnobRef.current.style.transform = 'translate(0px, 0px)';
+      }
+      onMove(0, 0, false, false);
+    }
   };
 
   // --- RIGHT JOYSTICK HANDLERS ---
@@ -123,22 +147,44 @@ export const TouchControls: React.FC<Props> = ({
 
   const handleRightTouchStart = (e: React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
-    const touch = e.touches[0];
-    if (touch) processRightTouch(touch.clientX, touch.clientY);
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      rightTouchIdRef.current = touch.identifier;
+      processRightTouch(touch.clientX, touch.clientY);
+      break;
+    }
   };
 
   const handleRightTouchMove = (e: React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
-    const touch = e.touches[0];
-    if (touch) processRightTouch(touch.clientX, touch.clientY);
+    if (rightTouchIdRef.current === null) return;
+    for (let i = 0; i < e.touches.length; i++) {
+      const touch = e.touches[i];
+      if (touch.identifier === rightTouchIdRef.current) {
+        processRightTouch(touch.clientX, touch.clientY);
+        break;
+      }
+    }
   };
 
   const handleRightTouchEnd = (e?: React.TouchEvent) => {
     if (e && e.cancelable) e.preventDefault();
-    if (rightKnobRef.current) {
-      rightKnobRef.current.style.transform = 'translate(0px, 0px)';
+    let shouldReset = !e;
+    if (e && rightTouchIdRef.current !== null) {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === rightTouchIdRef.current) {
+          shouldReset = true;
+          break;
+        }
+      }
     }
-    onAimShoot(null, false);
+    if (shouldReset) {
+      rightTouchIdRef.current = null;
+      if (rightKnobRef.current) {
+        rightKnobRef.current.style.transform = 'translate(0px, 0px)';
+      }
+      onAimShoot(null, false);
+    }
   };
 
   return (
@@ -200,6 +246,7 @@ export const TouchControls: React.FC<Props> = ({
           onTouchStart={handleLeftTouchStart}
           onTouchMove={handleLeftTouchMove}
           onTouchEnd={handleLeftTouchEnd}
+          onTouchCancel={handleLeftTouchEnd}
           style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
           className="bg-black/50 border-2 border-green-400/60 rounded-full relative flex items-center justify-center backdrop-blur-md shadow-2xl touch-none"
         >
@@ -277,6 +324,7 @@ export const TouchControls: React.FC<Props> = ({
           onTouchStart={handleRightTouchStart}
           onTouchMove={handleRightTouchMove}
           onTouchEnd={handleRightTouchEnd}
+          onTouchCancel={handleRightTouchEnd}
           style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
           className="bg-black/50 border-2 border-red-500/60 rounded-full relative flex items-center justify-center backdrop-blur-md shadow-2xl touch-none"
         >
