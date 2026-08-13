@@ -454,14 +454,17 @@ export const GameCanvas: React.FC<Props> = ({
               if (interpP.secondaryMag !== undefined) existingLocal.secondaryMag = interpP.secondaryMag;
               if (interpP.secondaryReserve !== undefined) existingLocal.secondaryReserve = interpP.secondaryReserve;
 
-              // Smoothly blend local player position if server & client drift > 60px
+              // Smoothly blend local player position if server & client drift too far
+              // Tuned for ~90ms+ ping to avoid rubber-banding
               const drift = Math.hypot(existingLocal.x - interpP.x, existingLocal.y - interpP.y);
-              if (drift > 200) {
+              if (drift > 300) {
+                // Teleport snap for extreme desync
                 existingLocal.x = interpP.x;
                 existingLocal.y = interpP.y;
-              } else if (drift > 60) {
-                existingLocal.x = existingLocal.x * 0.5 + interpP.x * 0.5;
-                existingLocal.y = existingLocal.y * 0.5 + interpP.y * 0.5;
+              } else if (drift > 100) {
+                // Gentle blend toward server position
+                existingLocal.x = existingLocal.x * 0.85 + interpP.x * 0.15;
+                existingLocal.y = existingLocal.y * 0.85 + interpP.y * 0.15;
               }
               playerMap.set('human_1', existingLocal);
             } else {
@@ -700,6 +703,16 @@ export const GameCanvas: React.FC<Props> = ({
   const pickUpWeapon = (p: Player) => {
     if (p.isDead) return;
 
+    // In multiplayer, just send the pickup request to server — it handles everything authoritatively.
+    // The server snapshot will update our weapon, ammo, and pickup states.
+    if (isMultiplayer) {
+      pendingPickUpWeaponRef.current = true;
+      drawWeaponTimerRef.current = 250;
+      soundEngine.playPickup();
+      return;
+    }
+
+    // Singleplayer: do client-side pickup
     const nearby = pickupsRef.current.find(
       (pickup) => pickup.respawnTime <= 0 && Math.hypot(pickup.x - p.x, pickup.y - p.y) < 70
     );
@@ -721,7 +734,7 @@ export const GameCanvas: React.FC<Props> = ({
       p.isReloading = false;
       p.reloadProgress = 0;
 
-      nearby.respawnTime = 8.0; // 8s respawn timer - IMMEDIATELY HIDES WEAPON FROM SCREEN
+      nearby.respawnTime = 8.0;
       soundEngine.playPickup();
       drawWeaponTimerRef.current = 250;
       pendingPickUpWeaponRef.current = true;
