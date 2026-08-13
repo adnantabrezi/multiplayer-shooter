@@ -380,8 +380,11 @@ class NetworkManager {
         secondaryWeapon: player.secondaryWeapon,
         currentMag: player.currentMag,
         reserveAmmo: player.reserveAmmo,
+        secondaryMag: player.secondaryMag !== undefined ? player.secondaryMag : 0,
+        secondaryReserve: player.secondaryReserve !== undefined ? player.secondaryReserve : 0,
         isDead: player.isDead,
         isReloading: player.isReloading,
+        reloadProgress: Math.round((player.reloadProgress || 0) * 1000) / 1000,
         kills: player.kills,
         deaths: player.deaths
       }

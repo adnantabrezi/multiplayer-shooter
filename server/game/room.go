@@ -125,14 +125,16 @@ func NewRoom(code, mapID, mode string, botCount int, botDiff string, matchDurati
 		}
 	}
 
-	// Initialize Map Pickups & Crates
+	// Initialize Map Pickups & Crates with Random Weapons
+	availWeapons := []string{"ar", "sniper", "smg"}
 	for i, w := range gameMap.WeaponSpawns {
+		randW := availWeapons[rand.Intn(len(availWeapons))]
 		r.pickups = append(r.pickups, WeaponPickup{
 			ID:          fmt.Sprintf("pickup_%d", i),
-			WeaponType:  w.WeaponType,
+			WeaponType:  randW,
 			X:           w.X,
 			Y:           w.Y,
-			Ammo:        Weapons[w.WeaponType].MagazineSize,
+			Ammo:        Weapons[randW].MagazineSize,
 			RespawnTime: 0,
 		})
 	}
@@ -400,6 +402,20 @@ func (r *Room) ProcessInput(clientID string, input ClientInput) {
 			p.Vx -= math.Cos(p.AimAngle) * (w.Recoil * 0.4)
 			p.Vy -= math.Sin(p.AimAngle) * (w.Recoil * 0.4)
 
+			// Calculate exact gun muzzle tip position from shoulder pivot (matching client)
+			shoulderX := p.X
+			if p.FacingRight {
+				shoulderX += 2
+			} else {
+				shoulderX -= 2
+			}
+			shoulderY := p.Y - 2
+			if p.IsCrouching {
+				shoulderY = p.Y - 10
+			}
+			startX := shoulderX + math.Cos(p.AimAngle)*30
+			startY := shoulderY + math.Sin(p.AimAngle)*30
+
 			for b := 0; b < w.BulletsPerShot; b++ {
 				spreadAngle := p.AimAngle + (rand.Float64()-0.5)*w.Spread
 				vx := math.Cos(spreadAngle) * w.BulletSpeed
@@ -409,8 +425,8 @@ func (r *Room) ProcessInput(clientID string, input ClientInput) {
 					ID:               fmt.Sprintf("b_%d_%d", time.Now().UnixNano(), rand.Intn(1000)),
 					ShooterID:        p.ID,
 					WeaponType:       w.ID,
-					X:                p.X + math.Cos(p.AimAngle)*22,
-					Y:                p.Y + math.Sin(p.AimAngle)*22,
+					X:                startX,
+					Y:                startY,
 					Vx:               vx,
 					Vy:               vy,
 					Damage:           w.Damage,
@@ -455,6 +471,7 @@ func (r *Room) ProcessInput(clientID string, input ClientInput) {
 		p.ReserveAmmo, p.SecondaryReserve = p.SecondaryReserve, p.ReserveAmmo
 		p.IsReloading = false
 		p.ReloadProgress = 0
+		c.LastInput.SwapWeapon = false
 	}
 
 	// Weapon pickup via E key
@@ -464,7 +481,7 @@ func (r *Room) ProcessInput(clientID string, input ClientInput) {
 				continue
 			}
 			dist := math.Hypot(p.X-r.pickups[i].X, p.Y-r.pickups[i].Y)
-			if dist < 50.0 {
+			if dist < 70.0 {
 				p.SecondaryWeapon = p.PrimaryWeapon
 				p.SecondaryMag = p.CurrentMag
 				p.SecondaryReserve = p.ReserveAmmo
@@ -553,6 +570,11 @@ func (r *Room) ProcessPlayerState(clientID string, state *Player) {
 	}
 
 	state.ID = clientID
+
+	if c.Player != nil && c.Player.PrimaryWeapon != state.PrimaryWeapon {
+		c.LastInput.SwapWeapon = false
+	}
+
 	c.Player = state
 
 	found := false
@@ -586,7 +608,7 @@ func (r *Room) RelayMessage(senderID string, msg ServerMessage) {
 }
 
 func (r *Room) runLoop() {
-	ticker := time.NewTicker(time.Second / 30) // 30Hz Lightweight Snapshot Ticker (Near 0% CPU)
+	ticker := time.NewTicker(time.Second / 60) // 60Hz Physics & Game Simulation Ticker
 	defer ticker.Stop()
 
 	lastTime := time.Now()
@@ -603,9 +625,145 @@ func (r *Room) runLoop() {
 			r.mu.Lock()
 			r.tickSeq++
 			r.TimeRemaining = math.Max(0, r.TimeRemaining-dt)
+			gameMap := Maps[r.MapID]
+
+			// 1. Process client inputs & step player physics server-side
+			for _, c := range r.clients {
+				c.Mu.Lock()
+				input := c.LastInput
+				p := c.Player
+				c.Mu.Unlock()
+
+				if p != nil && !p.IsDead {
+					UpdatePlayerPhysics(p, gameMap, input, dt)
+
+					// Process Reloading Progression & Ammo Refill (Authoritative Server Side)
+					if p.IsReloading {
+						p.ReloadProgress += dt
+						w := GetWeapon(p.PrimaryWeapon)
+						reloadDurationSec := w.ReloadTime / 1000.0
+						if reloadDurationSec <= 0 {
+							reloadDurationSec = 1.6
+						}
+						if p.ReloadProgress >= reloadDurationSec {
+							needed := w.MagazineSize - p.CurrentMag
+							amount := needed
+							if amount > p.ReserveAmmo {
+								amount = p.ReserveAmmo
+							}
+							if amount > 0 {
+								p.CurrentMag += amount
+								p.ReserveAmmo -= amount
+							}
+							p.IsReloading = false
+							p.ReloadProgress = 0
+						}
+					}
+				} else if p != nil && p.IsDead {
+					p.RespawnTimer -= dt
+					if p.RespawnTimer <= 0 {
+						p.IsDead = false
+						p.Health = p.MaxHealth
+						p.Nitro = p.MaxNitro
+						p.Opacity = 1.0
+
+						// Random weapon pool for exciting respawns
+						weaponPool := []string{"ar", "smg", "shotgun", "sniper", "desert_eagle", "revolver", "m4", "ak47", "uzi", "mac10", "sawed_off", "mp5"}
+						randPrimary := weaponPool[rand.Intn(len(weaponPool))]
+						randSecondary := weaponPool[rand.Intn(len(weaponPool))]
+						for randSecondary == randPrimary {
+							randSecondary = weaponPool[rand.Intn(len(weaponPool))]
+						}
+
+						p.PrimaryWeapon = randPrimary
+						p.SecondaryWeapon = randSecondary
+
+						if w, ok := Weapons[randPrimary]; ok {
+							p.CurrentMag = w.MagazineSize
+							p.ReserveAmmo = w.ReserveAmmo
+						} else {
+							p.CurrentMag = 30
+							p.ReserveAmmo = 120
+						}
+						if w, ok := Weapons[randSecondary]; ok {
+							p.SecondaryMag = w.MagazineSize
+							p.SecondaryReserve = w.ReserveAmmo
+						} else {
+							p.SecondaryMag = 35
+							p.SecondaryReserve = 140
+						}
+						p.FragCount = 3
+						p.IsReloading = false
+						p.ReloadProgress = 0
+						spawnPt := gameMap.Spawns[rand.Intn(len(gameMap.Spawns))]
+						p.X = spawnPt.X
+						p.Y = spawnPt.Y
+						p.Vx = 0
+						p.Vy = 0
+					}
+				}
+			}
+
+			// 2. Step bullets
+			var newGrenadesFromBullets []GrenadeEntity
+			r.bullets, newGrenadesFromBullets = UpdateBullets(r.bullets, r.players, gameMap, dt, func(killer, victim *Player, weapon string, isHeadshot bool) {
+				if victim == nil {
+					return
+				}
+				killerName := "Suicide"
+				killerTeam := "none"
+				if killer != nil {
+					killerName = killer.Name
+					killerTeam = killer.Team
+				}
+				r.killFeed = append(r.killFeed, KillFeedEntry{
+					ID:         fmt.Sprintf("kf_%d", time.Now().UnixNano()),
+					KillerName: killerName,
+					KillerTeam: killerTeam,
+					VictimName: victim.Name,
+					VictimTeam: victim.Team,
+					WeaponUsed: weapon,
+					IsHeadshot: isHeadshot,
+					Timestamp:  time.Now().UnixMilli(),
+				})
+			})
+			r.grenades = append(r.grenades, newGrenadesFromBullets...)
+
+			// 3. Step grenades
+			var newExplosions []Explosion
+			r.grenades, newExplosions = UpdateGrenades(r.grenades, r.players, gameMap, dt, func(killer, victim *Player, weapon string, isHeadshot bool) {
+				if victim == nil {
+					return
+				}
+				killerName := "Suicide"
+				killerTeam := "none"
+				if killer != nil {
+					killerName = killer.Name
+					killerTeam = killer.Team
+				}
+				r.killFeed = append(r.killFeed, KillFeedEntry{
+					ID:         fmt.Sprintf("kf_%d", time.Now().UnixNano()),
+					KillerName: killerName,
+					KillerTeam: killerTeam,
+					VictimName: victim.Name,
+					VictimTeam: victim.Team,
+					WeaponUsed: weapon,
+					IsHeadshot: isHeadshot,
+					Timestamp:  time.Now().UnixMilli(),
+				})
+			})
+			r.explosions = append(r.explosions, newExplosions...)
+
+			// 4. Step pickups, health crates, booster crates
+			r.pickups, r.healthCrates, r.boosterCrates = UpdatePickupsAndHealth(r.pickups, r.healthCrates, r.boosterCrates, r.players, dt)
+
+			r.snapshotCounter++
+			shouldBroadcast := (r.snapshotCounter % 2 == 0) // Broadcast at 30Hz to save bandwidth
 			r.mu.Unlock()
 
-			r.broadcastSnapshot()
+			if shouldBroadcast {
+				r.broadcastSnapshot()
+			}
 		}
 	}
 }

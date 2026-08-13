@@ -101,6 +101,16 @@ func UpdateServerBotAI(bot *Player, players []*Player, pickups []WeaponPickup, g
 		if dist > 180 && dist < 450 && rand.Float64() < grenadeProb {
 			shouldThrowGrenade = true
 		}
+
+		// Check for nearby weapon pickups
+		for _, pickup := range pickups {
+			if pickup.RespawnTime <= 0 && math.Hypot(pickup.X-bot.X, pickup.Y-bot.Y) < 35.0 {
+				if bot.PrimaryWeapon != pickup.WeaponType {
+					input.PickUpWeapon = true
+					break
+				}
+			}
+		}
 	} else {
 		// Idle patrol
 		if rand.Float64() < 0.02 {

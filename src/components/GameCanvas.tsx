@@ -1,9 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { AirDrop, BlueZoneState, Bullet, EndMatchStats, GameMap, GameSettings, GrenadeEntity, KillFeedEntry, Particle, Player, WeaponPickup, HealthCrate } from '../types';
+import { AirDrop, BlueZoneState, Bullet, EndMatchStats, GameMap, GameSettings, GrenadeEntity, KillFeedEntry, Particle, Player, WeaponPickup, HealthCrate, WeaponType } from '../types';
 import { MAPS } from '../data/maps';
 import { WEAPONS, getWeapon } from '../data/weapons';
 import { updateBotAI } from '../game/botAI';
-import { updateBullets, updateGrenades, updatePlayerPhysics } from '../game/physics';
+import { updateBullets, updateGrenades, updatePlayerPhysics, lineSegmentIntersectsBox } from '../game/physics';
 import { soundEngine } from '../audio/soundEngine';
 import { drawAvatar, drawGunModel } from './renderAvatar';
 import { TouchControls } from './TouchControls';
@@ -151,6 +151,7 @@ export const GameCanvas: React.FC<Props> = ({
   // Weapon swap, pickup & animation refs
   const pendingSwapWeaponRef = useRef(false);
   const pendingPickUpWeaponRef = useRef(false);
+  const pendingReloadRef = useRef(false);
   const pendingThrowGrenadeRef = useRef(false);
   const pendingGrenadeFuseRef = useRef(5.0);
   const pendingMeleeRef = useRef(false);
@@ -300,17 +301,21 @@ export const GameCanvas: React.FC<Props> = ({
 
     playersRef.current = initialPlayers;
 
-    // Map Weapon Spawns
-    pickupsRef.current = map.weaponSpawns.map((w, idx) => ({
-      id: `pickup_${idx}`,
-      weaponType: w.weaponType,
-      x: w.x,
-      y: w.y,
-      vx: 0,
-      vy: 0,
-      ammo: getWeapon(w.weaponType).magazineSize,
-      respawnTime: 0
-    }));
+    // Map Weapon Spawns with Random Weapons
+    const availWeapons: WeaponType[] = ['ar', 'sniper', 'smg'];
+    pickupsRef.current = map.weaponSpawns.map((w, idx) => {
+      const randW = availWeapons[Math.floor(Math.random() * availWeapons.length)];
+      return {
+        id: `pickup_${idx}`,
+        weaponType: randW,
+        x: w.x,
+        y: w.y,
+        vx: 0,
+        vy: 0,
+        ammo: getWeapon(randW).magazineSize,
+        respawnTime: 0
+      };
+    });
 
     // Health Crates & Booster Refills
     healthCratesRef.current = map.healthSpawns.map((h, idx) => ({
@@ -332,7 +337,20 @@ export const GameCanvas: React.FC<Props> = ({
 
     if (isMultiplayer) {
       networkManager.onSnapshotReceived = (snapshot, interpolatedPlayers) => {
-        bulletsRef.current = snapshot.bullets || [];
+        // Retain recently created local client bullets that haven't expired yet
+        const localId = networkManager.clientId || 'human_1';
+        const freshLocalBullets = bulletsRef.current.filter((b) => 
+          (b.shooterId === 'human_1' || b.shooterId === localId) && 
+          b.life > 60
+        );
+
+        const serverBullets = snapshot.bullets || [];
+        const serverBulletIds = new Set(serverBullets.map(b => b.id));
+        const mergedBullets = [
+          ...serverBullets,
+          ...freshLocalBullets.filter(b => !serverBulletIds.has(b.id))
+        ];
+        bulletsRef.current = mergedBullets;
 
         // Spawn visual & audio explosion effects from server explosion events
         const explosions = (snapshot as any).explosions || [];
@@ -400,10 +418,41 @@ export const GameCanvas: React.FC<Props> = ({
               existingLocal.isDead = interpP.isDead;
               if (interpP.primaryWeapon) existingLocal.primaryWeapon = interpP.primaryWeapon;
               if (interpP.secondaryWeapon !== undefined) existingLocal.secondaryWeapon = interpP.secondaryWeapon;
-              existingLocal.currentMag = interpP.currentMag;
-              existingLocal.reserveAmmo = interpP.reserveAmmo;
-              existingLocal.isReloading = interpP.isReloading;
-              existingLocal.reloadProgress = interpP.reloadProgress;
+              
+              // Smoothly reconcile local player ammo & reload state without 20Hz snapshot jitter
+              if (existingLocal.isDead || existingLocal.primaryWeapon !== interpP.primaryWeapon) {
+                existingLocal.currentMag = interpP.currentMag;
+                existingLocal.reserveAmmo = interpP.reserveAmmo;
+                existingLocal.isReloading = interpP.isReloading;
+                existingLocal.reloadProgress = interpP.reloadProgress || 0;
+              } else {
+                if (existingLocal.isReloading) {
+                  if (!interpP.isReloading && interpP.currentMag > 0) {
+                    // Server finished reload -> accept server finished reload state
+                    existingLocal.isReloading = false;
+                    existingLocal.reloadProgress = 0;
+                    existingLocal.currentMag = interpP.currentMag;
+                    existingLocal.reserveAmmo = interpP.reserveAmmo;
+                  } else if (interpP.isReloading) {
+                    existingLocal.reloadProgress = Math.max(existingLocal.reloadProgress, interpP.reloadProgress || 0);
+                  }
+                } else {
+                  if (interpP.isReloading && existingLocal.currentMag <= 0) {
+                    existingLocal.isReloading = true;
+                    existingLocal.reloadProgress = interpP.reloadProgress || 0;
+                  } else {
+                    if (interpP.currentMag < existingLocal.currentMag) {
+                      existingLocal.currentMag = interpP.currentMag;
+                    }
+                    if (interpP.reserveAmmo < existingLocal.reserveAmmo) {
+                      existingLocal.reserveAmmo = interpP.reserveAmmo;
+                    }
+                  }
+                }
+              }
+
+              if (interpP.secondaryMag !== undefined) existingLocal.secondaryMag = interpP.secondaryMag;
+              if (interpP.secondaryReserve !== undefined) existingLocal.secondaryReserve = interpP.secondaryReserve;
 
               // Smoothly blend local player position if server & client drift > 60px
               const drift = Math.hypot(existingLocal.x - interpP.x, existingLocal.y - interpP.y);
@@ -474,7 +523,7 @@ export const GameCanvas: React.FC<Props> = ({
       if (e.code === 'KeyE' || keyLower === 'e') pickUpWeapon(p);
       if (e.code === 'KeyQ' || e.code === 'Digit1' || e.code === 'Digit2' || keyLower === 'q' || keyLower === '1' || keyLower === '2') swapWeapon(p);
       if (e.code === 'KeyG' || keyLower === 'g') startCookingGrenade(p);
-      if (e.code === 'KeyF' || e.code === 'KeyV' || keyLower === 'f' || keyLower === 'v') performMelee(p);
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyF' || e.code === 'KeyV' || keyLower === 'shift' || keyLower === 'f' || keyLower === 'v') performMelee(p);
       if (e.code === 'KeyZ' || e.code === 'KeyC' || keyLower === 'z' || keyLower === 'c') cycleScope();
       if (e.code === 'Escape' || keyLower === 'escape') onPause();
     };
@@ -621,6 +670,7 @@ export const GameCanvas: React.FC<Props> = ({
 
     p.isReloading = true;
     p.reloadProgress = 0;
+    pendingReloadRef.current = true;
     soundEngine.playReload();
   };
 
@@ -647,19 +697,11 @@ export const GameCanvas: React.FC<Props> = ({
     soundEngine.playPickup();
   };
 
-  const pickUpWeapon = useCallback((p: Player) => {
+  const pickUpWeapon = (p: Player) => {
     if (p.isDead) return;
 
-    // In multiplayer, always send the pickup request to server (it does authoritative proximity check)
-    if (isMultiplayer) {
-      pendingPickUpWeaponRef.current = true;
-      drawWeaponTimerRef.current = 250;
-      soundEngine.playPickup();
-      return;
-    }
-
     const nearby = pickupsRef.current.find(
-      (pickup) => pickup.respawnTime <= 0 && Math.hypot(pickup.x - p.x, pickup.y - p.y) < 60
+      (pickup) => pickup.respawnTime <= 0 && Math.hypot(pickup.x - p.x, pickup.y - p.y) < 70
     );
     if (nearby) {
       const newWeaponType = nearby.weaponType;
@@ -679,20 +721,20 @@ export const GameCanvas: React.FC<Props> = ({
       p.isReloading = false;
       p.reloadProgress = 0;
 
-      nearby.respawnTime = 8.0; // 8s respawn timer
+      nearby.respawnTime = 8.0; // 8s respawn timer - IMMEDIATELY HIDES WEAPON FROM SCREEN
       soundEngine.playPickup();
       drawWeaponTimerRef.current = 250;
       pendingPickUpWeaponRef.current = true;
     }
-  }, []);
+  };
 
   const startCookingGrenade = (p: Player) => {
     if (p.isDead || isCookingGrenadeRef.current) return;
     const gSlot = p.grenades.find((g) => g.type === p.activeGrenade && g.count > 0);
     if (!gSlot) return;
 
-    isCookingGrenadeRef.current = true;
     cookStartTimeRef.current = Date.now();
+    isCookingGrenadeRef.current = true;
     soundEngine.playPickup();
   };
 
@@ -701,21 +743,22 @@ export const GameCanvas: React.FC<Props> = ({
     const gSlot = p.grenades.find((g) => g.type === p.activeGrenade && g.count > 0);
     if (!gSlot) return;
 
+    const safeFuse = Math.max(0.5, remainingFuse);
     gSlot.count -= 1;
     pendingThrowGrenadeRef.current = true;
-    pendingGrenadeFuseRef.current = Math.max(0.05, remainingFuse);
+    pendingGrenadeFuseRef.current = safeFuse;
     soundEngine.playWeaponShoot('throw');
 
-    const speed = 12;
+    const speed = 14;
     const g: GrenadeEntity = {
       id: `gren_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       shooterId: p.id === 'human_1' ? (networkManager.clientId || 'human_1') : p.id,
       type: p.activeGrenade,
       x: p.x,
-      y: p.y - 10,
+      y: p.y - 12,
       vx: Math.cos(p.aimAngle) * speed,
       vy: Math.sin(p.aimAngle) * speed,
-      timer: Math.max(0.1, remainingFuse)
+      timer: safeFuse
     };
     grenadesRef.current.push(g);
     if (isMultiplayer) {
@@ -727,8 +770,9 @@ export const GameCanvas: React.FC<Props> = ({
     if (!isCookingGrenadeRef.current) return;
     isCookingGrenadeRef.current = false;
     setCookingFuseRemaining(null);
-    const elapsed = (Date.now() - cookStartTimeRef.current) / 1000.0;
-    const remainingFuse = Math.max(0.1, 5.0 - elapsed);
+    const elapsed = cookStartTimeRef.current > 0 ? (Date.now() - cookStartTimeRef.current) / 1000.0 : 0;
+    cookStartTimeRef.current = 0;
+    const remainingFuse = Math.max(0.5, 5.0 - elapsed);
     throwCookedGrenade(p, remainingFuse);
   };
 
@@ -953,26 +997,28 @@ export const GameCanvas: React.FC<Props> = ({
             grenadeFuse: pendingGrenadeFuseRef.current,
             swapWeapon: pendingSwapWeaponRef.current,
             pickUpWeapon: pendingPickUpWeaponRef.current,
-            reload: keysRef.current['KeyR'] || human.isReloading || false,
+            reload: pendingReloadRef.current || keysRef.current['KeyR'] || false,
             melee: pendingMeleeRef.current
           });
           pendingSwapWeaponRef.current = false;
+          pendingPickUpWeaponRef.current = false;
+          pendingReloadRef.current = false;
           pendingThrowGrenadeRef.current = false;
           pendingGrenadeFuseRef.current = 5.0;
-          pendingPickUpWeaponRef.current = false;
           pendingMeleeRef.current = false;
         }
 
         // Live Cooking Fuse Countdown Tick & Hand-detonation check
-        if (isCookingGrenadeRef.current) {
+        if (isCookingGrenadeRef.current && cookStartTimeRef.current > 0) {
           const elapsed = (Date.now() - cookStartTimeRef.current) / 1000.0;
           const remaining = Math.max(0, 5.0 - elapsed);
           setCookingFuseRemaining(remaining);
           if (remaining <= 0) {
-            // BOOM! Explodes in hand!
+            // Hand-detonates after cooking for full 5 seconds
             isCookingGrenadeRef.current = false;
             setCookingFuseRemaining(null);
-            throwCookedGrenade(human, 0.05);
+            cookStartTimeRef.current = 0;
+            throwCookedGrenade(human, 0.5);
           }
         }
 
@@ -1000,7 +1046,7 @@ export const GameCanvas: React.FC<Props> = ({
           lastHudUpdateRef.current = time;
 
           const nearby = human && !human.isDead
-            ? pickupsRef.current.find(p => p.respawnTime <= 0 && Math.hypot(p.x - human.x, p.y - human.y) < 55)
+            ? pickupsRef.current.find(p => p.respawnTime <= 0 && Math.hypot(p.x - human.x, p.y - human.y) < 70)
             : null;
 
           if (nearby) {
@@ -1127,7 +1173,8 @@ export const GameCanvas: React.FC<Props> = ({
           if (p.isReloading) {
             p.reloadProgress += dt;
             const w = getWeapon(p.primaryWeapon);
-            if (p.reloadProgress >= w.reloadTime) {
+            const reloadSec = (w.reloadTime || 1600) / 1000.0;
+            if (p.reloadProgress >= reloadSec) {
               const needed = w.magazineSize - p.currentMag;
               const amount = Math.min(needed, p.reserveAmmo);
               p.currentMag += amount;
@@ -1188,27 +1235,26 @@ export const GameCanvas: React.FC<Props> = ({
           });
         });
       }
-      // --- CLIENT-SIDE BULLET INTERPOLATION (Multiplayer) ---
-      // Advance bullet positions locally between 20Hz server snapshots for smooth visuals
-      if (isMultiplayer) {
-        bulletsRef.current = bulletsRef.current.filter((b) => {
-          b.x += b.vx;
-          b.y += b.vy;
-          b.distanceTraveled = (b.distanceTraveled || 0) + Math.hypot(b.vx, b.vy);
-          b.life = (b.life || 80) - 1;
-          return b.life > 0;
-        });
-        grenadesRef.current.forEach((g) => {
-          if (!g.isStuck) {
-            g.x += g.vx;
-            g.y += g.vy;
-            g.vy += 0.35; // gravity
-          }
-        });
-      }
 
-      // --- BULLETS & GRENADES UPDATE (Offline mode) ---
-      if (!isMultiplayer) {
+      // --- BULLETS & GRENADES UPDATE (Multiplayer & Offline) ---
+      if (isMultiplayer) {
+        // High-precision sub-step raycasting against map platforms in multiplayer
+        bulletsRef.current = updateBullets(
+          bulletsRef.current,
+          playersRef.current,
+          map,
+          particlesRef.current,
+          spawnExplosion,
+          () => {} // Server is authoritative for damage
+        );
+        grenadesRef.current = updateGrenades(
+          grenadesRef.current,
+          playersRef.current,
+          map,
+          particlesRef.current,
+          spawnExplosion
+        );
+      } else {
         bulletsRef.current = updateBullets(
           bulletsRef.current,
           playersRef.current,
@@ -1236,6 +1282,7 @@ export const GameCanvas: React.FC<Props> = ({
           particlesRef.current,
           spawnExplosion
         );
+      }
 
         // --- PUBG BATTLE ROYALE MODE LOGIC ---
         if (settings.gameMode === 'battle-royale') {
@@ -1289,7 +1336,6 @@ export const GameCanvas: React.FC<Props> = ({
             });
           }
         }
-      }
 
       // --- RENDER CAMERA VIEWPORT ---
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1328,12 +1374,20 @@ export const GameCanvas: React.FC<Props> = ({
       // Weapon Pickups (Renders actual 2D Vector Gun Models!)
       pickupsRef.current.forEach((pickup) => {
         if (pickup.respawnTime > 0) {
-          pickup.respawnTime -= dt;
+          if (!isMultiplayer) {
+            pickup.respawnTime -= dt;
+            if (pickup.respawnTime <= 0) {
+              pickup.respawnTime = 0;
+              const availWeapons: WeaponType[] = ['ar', 'sniper', 'smg'];
+              pickup.weaponType = availWeapons[Math.floor(Math.random() * availWeapons.length)];
+              pickup.ammo = getWeapon(pickup.weaponType).magazineSize;
+            }
+          }
           return;
         }
         const w = getWeapon(pickup.weaponType);
         const floatOffsetY = Math.sin(Date.now() * 0.004 + pickup.x) * 4;
-        const isNearLocal = human && !human.isDead && Math.hypot(pickup.x - human.x, pickup.y - human.y) < 60;
+        const isNearLocal = human && !human.isDead && Math.hypot(pickup.x - human.x, pickup.y - human.y) < 70;
 
         ctx.save();
         ctx.translate(pickup.x, pickup.y + floatOffsetY);
@@ -1535,8 +1589,8 @@ export const GameCanvas: React.FC<Props> = ({
         // High-Visibility Reload Loader Indicator Above Avatar
         if (p.isReloading) {
           const w = getWeapon(p.primaryWeapon);
-          const totalReload = w.reloadTime || 1600;
-          const ratio = Math.min(1.0, Math.max(0.0, (p.reloadProgress || 0) / totalReload));
+          const reloadSec = (w.reloadTime || 1600) / 1000.0;
+          const ratio = Math.min(1.0, Math.max(0.0, (p.reloadProgress || 0) / reloadSec));
 
           // Reload text tag
           ctx.fillStyle = '#f1c40f';
@@ -1569,28 +1623,20 @@ export const GameCanvas: React.FC<Props> = ({
           const startX = shoulderX + Math.cos(p.aimAngle) * muzzleDist;
           const startY = shoulderY + Math.sin(p.aimAngle) * muzzleDist;
 
-          let endX = startX;
-          let endY = startY;
           const maxDist = 700;
-          const step = 8;
-          const cosA = Math.cos(p.aimAngle);
-          const sinA = Math.sin(p.aimAngle);
+          const lineEndX = startX + Math.cos(p.aimAngle) * maxDist;
+          const lineEndY = startY + Math.sin(p.aimAngle) * maxDist;
+          let closestHitT = 1.0;
+          let endX = lineEndX;
+          let endY = lineEndY;
 
-          for (let d = 0; d < maxDist; d += step) {
-            const checkX = startX + cosA * d;
-            const checkY = startY + sinA * d;
-
-            const hitPlat = map.platforms.find(
-              (plat) => checkX >= plat.x && checkX <= plat.x + plat.w && checkY >= plat.y && checkY <= plat.y + plat.h
-            );
-
-            if (hitPlat) {
-              endX = checkX;
-              endY = checkY;
-              break;
+          for (const plat of map.platforms) {
+            const res = lineSegmentIntersectsBox(startX, startY, lineEndX, lineEndY, plat.x, plat.y, plat.w, plat.h);
+            if (res.hit && res.t < closestHitT) {
+              closestHitT = res.t;
+              endX = res.hitX;
+              endY = res.hitY;
             }
-            endX = checkX;
-            endY = checkY;
           }
 
           const lColor =
@@ -1958,7 +2004,7 @@ export const GameCanvas: React.FC<Props> = ({
                   <div
                     className="bg-yellow-400 h-full transition-all duration-75"
                     style={{
-                      width: `${Math.min(100, Math.max(10, ((hudState.reloadProgress || 0) / (getWeapon(hudState.primaryWeapon)?.reloadTime || 1600)) * 100))}%`
+                      width: `${Math.min(100, Math.max(10, ((hudState.reloadProgress || 0) / ((getWeapon(hudState.primaryWeapon)?.reloadTime || 1600) / 1000.0)) * 100))}%`
                     }}
                   />
                 </div>

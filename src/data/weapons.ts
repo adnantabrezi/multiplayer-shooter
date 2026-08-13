@@ -1,25 +1,6 @@
 import { Weapon, WeaponType } from '../types';
 
 export const WEAPONS: Record<WeaponType, Weapon> = {
-  punch: {
-    id: 'punch',
-    name: 'Fists / Punch',
-    category: 'melee',
-    damage: 35,
-    fireRate: 2.5,
-    reloadTime: 0,
-    magazineSize: Infinity,
-    reserveAmmo: Infinity,
-    spread: 0,
-    bulletSpeed: 0,
-    bulletsPerShot: 1,
-    recoil: 0,
-    color: '#f39c12',
-    zoomFactor: 1.0,
-    isDualWieldable: false,
-    description: 'Fast melee punch for close encounters.',
-    iconSymbol: '✊'
-  },
   smg: {
     id: 'smg',
     name: 'Submachine Gun (SMG)',
@@ -64,21 +45,21 @@ export const WEAPONS: Record<WeaponType, Weapon> = {
     id: 'sniper',
     name: 'Sniper Rifle (M200)',
     category: 'heavy',
-    damage: 95,
-    fireRate: 1.0,
-    reloadTime: 2400,
-    magazineSize: 5,
-    reserveAmmo: 25,
-    spread: 0.005,
-    bulletSpeed: 93,
+    damage: 120,
+    fireRate: 0.85,
+    reloadTime: 1800,
+    magazineSize: 6,
+    reserveAmmo: 30,
+    spread: 0.0,
+    bulletSpeed: 110,
     bulletsPerShot: 1,
-    recoil: 5.0,
-    color: '#9b59b6',
+    recoil: 4.5,
+    color: '#a855f7',
     zoomFactor: 1.5,
     isDualWieldable: false,
     description: 'One-shot high precision long-range sniper rifle with scope zoom.',
     iconSymbol: '🔭',
-    maxRange: 2400
+    maxRange: 2800
   }
 };
 
@@ -86,7 +67,7 @@ export const getWeapon = (type: string | undefined | null): Weapon => {
   if (type && WEAPONS[type as WeaponType]) {
     return WEAPONS[type as WeaponType];
   }
-  if (type === 'sniper') return WEAPONS.sniper;
-  if (type === 'smg' || type === 'uzi' || type === 'pistol' || type === 'deagle') return WEAPONS.smg;
+  if (type === 'sniper' || type === 'm200' || type === 'rifle') return WEAPONS.sniper;
+  if (type === 'smg' || type === 'pistol' || type === 'uzi' || type === 'mac10' || type === 'mp5') return WEAPONS.smg;
   return WEAPONS.ar;
 };

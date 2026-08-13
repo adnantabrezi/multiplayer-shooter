@@ -24,23 +24,15 @@ export function drawAvatar(
   // Local velocity relative to avatar facing direction
   const localVx = facingRight ? vx : -vx;
   const localVy = vy;
+  const speed = Math.hypot(localVx, localVy);
 
-  // Calculate local flight tilt angle
-  let tiltAngle = 0;
-  if (isBoosting || Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5) {
-    // Lean forward when moving forward, lean backward when moving backward
-    tiltAngle = localVx * 0.045;
-
-    // Upward jetpack climb tilt
-    if (isBoosting && localVy < 0) {
-      tiltAngle += 0.14;
-    } else if (localVy > 3) {
-      tiltAngle -= 0.10;
-    }
-
-    // Clamp tilt angle to [-25 deg, +25 deg] ([-0.45 rad, +0.45 rad])
-    tiltAngle = Math.max(-0.45, Math.min(0.45, tiltAngle));
-  }
+  // --- MINI MILITIA STYLE BODY TILT ---
+  // Body stays mostly upright. Only a subtle lean from horizontal movement.
+  // The arm+gun handle aim direction independently (section 2 below).
+  const forwardLean = localVx * 0.02;                       // gentle lean when running
+  const fallLean = (localVy > 1 ? localVy * 0.015 : 0);     // slight forward lean when falling
+  let tiltAngle = forwardLean + fallLean;
+  tiltAngle = Math.max(-0.26, Math.min(0.26, tiltAngle));   // clamp ±15 degrees
 
   // --- 1. RENDER AVATAR BODY & HEAD (FACING DIRECTION & TILT TRANSFORM) ---
   ctx.save();

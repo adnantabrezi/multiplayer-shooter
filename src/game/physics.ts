@@ -103,16 +103,18 @@ export function updatePlayerPhysics(
   // Jetpack Boost with smooth force blending
   if (input.boost && player.nitro > 0) {
     player.isBoosting = true;
-    player.nitro = Math.max(0, player.nitro - 0.40);
+    player.nitro = Math.max(0, player.nitro - 0.45);
     player.vy -= JETPACK_THRUST;
     if (player.vy < -MAX_JETPACK_SPEED) {
       player.vy = player.vy * 0.82 + (-MAX_JETPACK_SPEED) * 0.18;
     }
   } else {
     player.isBoosting = false;
-    // Recharge Nitro when grounded
+    // Recharge Nitro (faster when grounded, gradual while airborne)
     if (player.isGrounded) {
-      player.nitro = Math.min(player.maxNitro, player.nitro + 0.6);
+      player.nitro = Math.min(player.maxNitro, player.nitro + 0.65);
+    } else {
+      player.nitro = Math.min(player.maxNitro, player.nitro + 0.25);
     }
   }
 
@@ -313,9 +315,8 @@ export function updateBullets(
       let hitY = subEndY;
       let hitHeadshot = false;
 
-      // 1. Raycast against Map Platforms (Solid)
+      // 1. Raycast against Map Platforms
       for (const plat of map.platforms) {
-        if (plat.type === 'one-way') continue;
         const res = lineSegmentIntersectsBox(
           subStartX, subStartY, subEndX, subEndY,
           plat.x, plat.y, plat.w, plat.h
@@ -430,7 +431,7 @@ export function updateGrenades(
   const activeGrenades: GrenadeEntity[] = [];
 
   for (const g of grenades) {
-    g.timer -= 16; // ms step approx
+    g.timer -= 1 / 60; // frame step in seconds
 
     if (!g.isStuck) {
       g.vy += GRAVITY;
@@ -441,7 +442,6 @@ export function updateGrenades(
 
       let hitPlat = false;
       for (const plat of map.platforms) {
-        if (plat.type === 'one-way') continue;
         const res = lineSegmentIntersectsBox(startX, startY, endX, endY, plat.x, plat.y, plat.w, plat.h);
         if (res.hit) {
           hitPlat = true;

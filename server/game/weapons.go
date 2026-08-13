@@ -58,30 +58,30 @@ var Weapons = map[string]Weapon{
 		ID:              "sniper",
 		Name:            "Heavy Sniper Rifle",
 		Category:        "heavy",
-		Damage:          95,
-		FireRate:        1.0,
-		ReloadTime:      2400,
-		MagazineSize:    5,
-		ReserveAmmo:     25,
-		Spread:          0.005,
-		BulletSpeed:     93,
+		Damage:          120,
+		FireRate:        0.85,
+		ReloadTime:      1800,
+		MagazineSize:    6,
+		ReserveAmmo:     30,
+		Spread:          0.0,
+		BulletSpeed:     110,
 		BulletsPerShot:  1,
-		Recoil:          5.0,
-		Color:           "#9b59b6",
-		ZoomFactor:      1.4,
+		Recoil:          4.5,
+		Color:           "#a855f7",
+		ZoomFactor:      1.5,
 		IsDualWieldable: false,
-		MaxRange:        2400,
+		MaxRange:        2800,
 	},
 }
 
 func GetWeapon(id string) Weapon {
-	if w, ok := Weapons[id]; ok {
+	if w, exists := Weapons[id]; exists {
 		return w
 	}
 	if id == "sniper" || id == "m200" || id == "rifle" {
 		return Weapons["sniper"]
 	}
-	if id == "smg" || id == "uzi" || id == "deagle" || id == "pistol" {
+	if id == "smg" || id == "pistol" || id == "uzi" || id == "mac10" || id == "mp5" {
 		return Weapons["smg"]
 	}
 	return Weapons["ar"]

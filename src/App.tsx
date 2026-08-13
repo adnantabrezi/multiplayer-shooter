@@ -8,6 +8,7 @@ import { PauseOverlay } from './components/PauseOverlay';
 import { EndGameModal } from './components/EndGameModal';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { NetworkHUD } from './components/NetworkHUD';
+import { soundEngine } from './audio/soundEngine';
 
 const DEFAULT_AVATAR: AvatarConfig = {
   headgear: 'helmet_commander',
@@ -28,7 +29,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   matchDuration: 300,
   killLimit: 15,
   goreEnabled: true,
-  showTouchControls: typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0),
+  showTouchControls: false,
   joystickSize: 'medium',
   joystickPosition: 'bottom',
   enableLaserSight: true,
@@ -71,18 +72,13 @@ export default function App() {
     } catch (e) {}
   }, [avatar]);
 
-  // Persist Settings to localStorage on change
+  // Persist Settings to localStorage on change & sync sound engine
   React.useEffect(() => {
     try {
       localStorage.setItem('mini_militia_settings', JSON.stringify(settings));
     } catch (e) {}
+    soundEngine.setVolumes(settings.soundVolume, settings.musicVolume);
   }, [settings]);
-
-  // Auto-detect mobile touch capabilities on load
-  React.useEffect(() => {
-    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    setSettings((prev) => ({ ...prev, showTouchControls: isTouch }));
-  }, []);
 
   // Modals
   const [isArmoryOpen, setIsArmoryOpen] = useState(false);

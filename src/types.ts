@@ -25,8 +25,7 @@ export interface AirDrop {
   lootClaimed: boolean;
 }
 
-export type WeaponType = 
-  | 'punch'
+export type WeaponType =
   | 'smg'
   | 'ar'
   | 'sniper';

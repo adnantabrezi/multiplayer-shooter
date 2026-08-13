@@ -395,7 +395,7 @@ export const MainMenu: React.FC<Props> = ({
 
       {/* Footer Controls & Command Bar */}
       <div className="relative z-10 text-center text-[11px] text-gray-300 font-mono tracking-widest space-y-1 bg-black/40 px-6 py-2 rounded-full border border-white/10">
-        <p>[WASD / ARROWS] MOVE & JETPACK • [MOUSE] AIM & SHOOT • [R] RELOAD • [Q] SWAP • [G] GRENADE • [F] MELEE</p>
+        <p>[WASD / ARROWS] MOVE & JETPACK • [MOUSE] AIM & SHOOT • [E] PICKUP • [R] RELOAD • [Q] SWAP • [G] GRENADE • [LSHIFT / F] MELEE</p>
       </div>
 
     </div>

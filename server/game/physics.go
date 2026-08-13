@@ -110,7 +110,7 @@ func UpdatePlayerPhysics(p *Player, gameMap GameMap, input ClientInput, deltaTim
 
 	if input.Boost && p.Nitro > 0 {
 		p.IsBoosting = true
-		p.Nitro = math.Max(0, p.Nitro-0.40)
+		p.Nitro = math.Max(0, p.Nitro-0.45)
 		p.Vy -= JetpackThrust
 		if p.Vy < -MaxJetpackSpeed {
 			p.Vy = p.Vy*0.82 + (-MaxJetpackSpeed)*0.18
@@ -118,7 +118,9 @@ func UpdatePlayerPhysics(p *Player, gameMap GameMap, input ClientInput, deltaTim
 	} else {
 		p.IsBoosting = false
 		if p.IsGrounded {
-			p.Nitro = math.Min(p.MaxNitro, p.Nitro+0.6)
+			p.Nitro = math.Min(p.MaxNitro, p.Nitro+0.65)
+		} else {
+			p.Nitro = math.Min(p.MaxNitro, p.Nitro+0.25)
 		}
 	}
 
@@ -322,9 +324,6 @@ func UpdateBullets(bullets []Bullet, players []*Player, gameMap GameMap, deltaTi
 			// 1. Raycast collision against platforms
 			if !b.IsLaser {
 				for _, plat := range gameMap.Platforms {
-					if plat.Type == "one-way" {
-						continue
-					}
 					hit := LineSegmentIntersectsBox(subStartX, subStartY, subEndX, subEndY, plat.X, plat.Y, plat.W, plat.H)
 					if hit.Hit {
 						hitOccurred = true
@@ -551,9 +550,6 @@ func UpdateGrenades(grenades []GrenadeEntity, players []*Player, gameMap GameMap
 
 			hitPlat := false
 			for _, plat := range gameMap.Platforms {
-				if plat.Type == "one-way" {
-					continue
-				}
 				hit := LineSegmentIntersectsBox(startX, startY, endX, endY, plat.X, plat.Y, plat.W, plat.H)
 				if hit.Hit {
 					hitPlat = true
@@ -586,31 +582,18 @@ func UpdateGrenades(grenades []GrenadeEntity, players []*Player, gameMap GameMap
 }
 
 func UpdatePickupsAndHealth(pickups []WeaponPickup, healthCrates []HealthCrate, boosterCrates []HealthCrate, players []*Player, deltaTime float64) ([]WeaponPickup, []HealthCrate, []HealthCrate) {
-	// Update Weapon Pickups
+	// Update Weapon Pickups Respawn Timers & Randomize Weapon Type on Respawn
+	availWeapons := []string{"ar", "sniper", "smg"}
 	for i := range pickups {
 		if pickups[i].RespawnTime > 0 {
 			pickups[i].RespawnTime -= deltaTime
-			continue
-		}
-		for _, p := range players {
-			if p.IsDead || p.IsBot {
-				continue
-			}
-			dist := math.Hypot(p.X-pickups[i].X, p.Y-pickups[i].Y)
-			if dist < 35 {
-				// Move current primary to secondary slot and set new weapon as primary
-				p.SecondaryWeapon = p.PrimaryWeapon
-				p.SecondaryMag = p.CurrentMag
-				p.SecondaryReserve = p.ReserveAmmo
-				p.PrimaryWeapon = pickups[i].WeaponType
-				p.IsReloading = false
-				p.ReloadProgress = 0
-				if w, ok := Weapons[pickups[i].WeaponType]; ok {
-					p.CurrentMag = w.MagazineSize
-					p.ReserveAmmo = w.ReserveAmmo
+			if pickups[i].RespawnTime <= 0 {
+				pickups[i].RespawnTime = 0
+				randW := availWeapons[rand.Intn(len(availWeapons))]
+				pickups[i].WeaponType = randW
+				if w, ok := Weapons[randW]; ok {
+					pickups[i].Ammo = w.MagazineSize
 				}
-				pickups[i].RespawnTime = 8.0 // Auto-spawns after 8s
-				break
 			}
 		}
 	}
